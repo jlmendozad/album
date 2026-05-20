@@ -406,6 +406,7 @@
         let scannerLoopTimer = null;
         let sesionUsuario = null;
         let vistaActiva = "album";
+        let preservarScrollAlbum = true;
 
         const sesionKey = "panini-session";
         const apiCliente = {
@@ -565,6 +566,8 @@
         const renderizarControlAlbum = () => {
             const raiz = document.getElementById("albumControl");
             if (!raiz) return;
+            const listadoPrevio = document.getElementById("albumStickerList");
+            const scrollAlbumPrevio = preservarScrollAlbum && listadoPrevio ? listadoPrevio.scrollTop : 0;
 
             const idsTengo = obtenerIdsTengo();
             const idsSwaps = obtenerIdsPorEstado(2);
@@ -685,9 +688,12 @@
                         </div>
                     </div>
 
-                    <div class="space-y-5 max-h-[560px] overflow-y-auto pr-1">${htmlSecciones || `<p class="text-center text-xs text-slate-400 py-6">No hay estampas con ese filtro.</p>`}</div>
+                    <div id="albumStickerList" class="space-y-5 max-h-[560px] overflow-y-auto pr-1">${htmlSecciones || `<p class="text-center text-xs text-slate-400 py-6">No hay estampas con ese filtro.</p>`}</div>
                 </div>
             `;
+            const listadoActual = document.getElementById("albumStickerList");
+            if (listadoActual) listadoActual.scrollTop = scrollAlbumPrevio;
+            preservarScrollAlbum = true;
         };
 
         // ========================================================
@@ -1053,6 +1059,7 @@
             filtroAlbum = "all";
             busquedaAlbum = "";
             estampaSeleccionadaId = null;
+            preservarScrollAlbum = false;
             await cargarEstadoAlbum(albumActivo);
             renderizarControlAlbum();
         };
@@ -1080,12 +1087,15 @@
 
         window.setFiltroAlbum = (filtro) => {
             filtroAlbum = filtro;
+            estampaSeleccionadaId = null;
+            preservarScrollAlbum = false;
             renderizarControlAlbum();
         };
 
         window.buscarEnAlbum = (valor) => {
             busquedaAlbum = valor;
             estampaSeleccionadaId = null;
+            preservarScrollAlbum = false;
             renderizarControlAlbum();
             const input = document.getElementById("busquedaAlbum");
             if (input) {
@@ -1097,6 +1107,7 @@
         window.limpiarBusquedaAlbum = () => {
             busquedaAlbum = "";
             estampaSeleccionadaId = null;
+            preservarScrollAlbum = false;
             renderizarControlAlbum();
         };
 
