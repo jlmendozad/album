@@ -22,6 +22,22 @@
             "POR", "COD", "UZB", "COL", "ENG", "CRO", "GHA", "PAN"
         ];
 
+        const banderasPais = {
+            MEX: "🇲🇽", RSA: "🇿🇦", KOR: "🇰🇷", CZE: "🇨🇿", CAN: "🇨🇦", BIH: "🇧🇦", QAT: "🇶🇦", SUI: "🇨🇭",
+            BRA: "🇧🇷", MAR: "🇲🇦", HAI: "🇭🇹", SCO: "🏴", USA: "🇺🇸", PAR: "🇵🇾", AUS: "🇦🇺", TUR: "🇹🇷",
+            GER: "🇩🇪", CUW: "🇨🇼", CIV: "🇨🇮", ECU: "🇪🇨", NED: "🇳🇱", JPN: "🇯🇵", SWE: "🇸🇪", TUN: "🇹🇳",
+            BEL: "🇧🇪", EGY: "🇪🇬", IRN: "🇮🇷", NZL: "🇳🇿", ESP: "🇪🇸", CPV: "🇨🇻", KSA: "🇸🇦", URU: "🇺🇾",
+            FRA: "🇫🇷", SEN: "🇸🇳", IRQ: "🇮🇶", NOR: "🇳🇴", ARG: "🇦🇷", ALG: "🇩🇿", AUT: "🇦🇹", JOR: "🇯🇴",
+            POR: "🇵🇹", COD: "🇨🇩", UZB: "🇺🇿", COL: "🇨🇴", ENG: "🏴", CRO: "🇭🇷", GHA: "🇬🇭", PAN: "🇵🇦"
+        };
+
+        const obtenerPrefijoCodigo = (code) => code.split(" ")[0];
+
+        const formatearCodigoPanini = (code) => {
+            const prefijo = obtenerPrefijoCodigo(code);
+            return banderasPais[prefijo] ? `${code} ${banderasPais[prefijo]}` : code;
+        };
+
         const dbCorrelativos = {};
         const dbCodigos = {};
 
@@ -168,7 +184,11 @@
             const prefijo = matchPrefijo[1].toUpperCase();
             if (!prefijosValidos.has(prefijo)) return null;
 
-            const numeros = matchPrefijo[2].match(/\d+/g);
+            const resto = matchPrefijo[2];
+            const prefijosEnResto = new RegExp(`\\b(${["FWC", ...ordenPaises].join("|")})\\b`, "i");
+            if (prefijosEnResto.test(resto)) return null;
+
+            const numeros = resto.match(/\d+/g);
             if (!numeros) return [];
 
             return numeros
@@ -285,7 +305,7 @@
             [...listaIds].sort(compararPorCodigoPanini).forEach(id => {
                 const c = dbCorrelativos[id];
                 html += `<div class="flex justify-between py-1 border-b border-slate-100 last:border-0 text-[11px]">
-                    <span class="font-bold text-slate-700">${c.code}</span>
+                    <span class="font-bold text-slate-700">${formatearCodigoPanini(c.code)}</span>
                     <span class="text-slate-400 text-[10px]">${c.desc}</span>
                 </div>`;
             });
@@ -309,7 +329,7 @@
 
         const construirResumenCodigos = (ids, max = 10) => {
             if (!ids.length) return "";
-            const codigos = [...ids].sort(compararPorCodigoPanini).slice(0, max).map(id => dbCorrelativos[id].code).join(", ");
+            const codigos = [...ids].sort(compararPorCodigoPanini).slice(0, max).map(id => formatearCodigoPanini(dbCorrelativos[id].code)).join(", ");
             return ids.length > max ? `${codigos} y ${ids.length - max} más` : codigos;
         };
 
@@ -368,7 +388,7 @@
             } else {
                 [...listaIds].sort(compararPorCodigoPanini).forEach(id => {
                     const c = dbCorrelativos[id];
-                    txt += `• ${c.code} (${c.desc})\n`;
+                    txt += `• ${formatearCodigoPanini(c.code)} (${c.desc})\n`;
                 });
             }
             txt += `\nPuedes generar tu propio cruce de estampas aquí:\n${appUrlPublica}`;
@@ -410,7 +430,7 @@
             ordenPaises.forEach(pais => {
                 secciones.push({
                     id: `pais-${pais}`,
-                    titulo: pais,
+                    titulo: `${pais} ${banderasPais[pais] || ""}`.trim(),
                     icono: "",
                     ids: Object.keys(dbCorrelativos).map(Number).filter(id => dbCorrelativos[id].code.startsWith(`${pais} `)).sort(compararPorCodigoPanini)
                 });
@@ -509,13 +529,13 @@
         };
 
         const construirTextoCodigos = (ids) => {
-            return [...ids].sort(compararPorCodigoPanini).map(id => dbCorrelativos[id].code).join(", ");
+            return [...ids].sort(compararPorCodigoPanini).map(id => formatearCodigoPanini(dbCorrelativos[id].code)).join(", ");
         };
 
         const construirTextoIntercambio = (ids) => {
             return [...ids].sort(compararPorCodigoPanini).map(id => {
                 const disponibles = Math.max((estadoEstampas[id] || 0) - 1, 1);
-                const codigo = dbCorrelativos[id].code;
+                const codigo = formatearCodigoPanini(dbCorrelativos[id].code);
                 return disponibles > 1 ? `${codigo} x${disponibles}` : codigo;
             }).join(", ");
         };
@@ -1118,7 +1138,7 @@
                     <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Código detectado</p>
                     <div class="flex items-center justify-between gap-3">
                         <div>
-                            <p class="text-lg font-black text-slate-900">${item.code}</p>
+                                <p class="text-lg font-black text-slate-900">${formatearCodigoPanini(item.code)}</p>
                             <p class="text-xs text-slate-500">${item.desc}</p>
                             <p class="text-xs font-bold mt-1 ${cantidad === 0 ? "text-rose-600" : cantidad === 1 ? "text-emerald-700" : "text-orange-700"}">${estado}</p>
                         </div>
