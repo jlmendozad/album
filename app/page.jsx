@@ -3,8 +3,8 @@ import Script from "next/script";
 export default function HomePage() {
   return (
     <>
-      <Script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" strategy="beforeInteractive" />
-      <Script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" strategy="beforeInteractive" />
+      <Script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" strategy="afterInteractive" />
+      <Script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" strategy="afterInteractive" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js" strategy="afterInteractive" />
 
       <div className="max-w-md mx-auto px-4 py-6 md:max-w-2xl min-h-screen flex flex-col justify-between">
