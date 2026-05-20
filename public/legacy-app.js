@@ -1,0 +1,1381 @@
+// ========================================================
+        // 1. DICCIONARIO DE CONVERSIÓN PANINI 2026 (980 ESTAMPAS)
+        // ========================================================
+        const infoInicial = [
+            { id: 1, code: "00", desc: "Logo Panini" },
+            { id: 2, code: "FWC 1", desc: "Copa Superior" },
+            { id: 3, code: "FWC 2", desc: "Copa Inferior" },
+            { id: 4, code: "FWC 3", desc: "Trío de Mascotas Oficiales" },
+            { id: 5, code: "FWC 4", desc: "Logo Oficial del Mundial 2026" },
+            { id: 6, code: "FWC 5", desc: "Trionda" },
+            { id: 7, code: "FWC 6", desc: "Emblema Sede Canadá" },
+            { id: 8, code: "FWC 7", desc: "Emblema Sede México" },
+            { id: 9, code: "FWC 8", desc: "Emblema Sede USA" }
+        ];
+
+        const ordenPaises = [
+            "MEX", "RSA", "KOR", "CZE", "CAN", "BIH", "QAT", "SUI",
+            "BRA", "MAR", "HAI", "SCO", "USA", "PAR", "AUS", "TUR",
+            "GER", "CUW", "CIV", "ECU", "NED", "JPN", "SWE", "TUN",
+            "BEL", "EGY", "IRN", "NZL", "ESP", "CPV", "KSA", "URU",
+            "FRA", "SEN", "IRQ", "NOR", "ARG", "ALG", "AUT", "JOR",
+            "POR", "COD", "UZB", "COL", "ENG", "CRO", "GHA", "PAN"
+        ];
+
+        const dbCorrelativos = {};
+        const dbCodigos = {};
+
+        infoInicial.forEach(item => {
+            dbCorrelativos[item.id] = { code: item.code, desc: item.desc };
+            dbCodigos[item.code.replace(/\s+/g, '').toUpperCase()] = item.id;
+        });
+
+        let currentId = 10;
+        ordenPaises.forEach(pais => {
+            for (let i = 1; i <= 20; i++) {
+                let code = `${pais} ${i}`;
+                let desc = i === 1 ? `Escudo ${pais}` : i === 13 ? `Foto de Equipo ${pais}` : `Jugador ${pais}`;
+                dbCorrelativos[currentId] = { code: code, desc: desc };
+                dbCodigos[`${pais}${i}`] = currentId;
+                currentId++;
+            }
+        });
+
+        for (let i = 9; i <= 19; i++) {
+            let code = `FWC ${i}`;
+            dbCorrelativos[currentId] = { code: code, desc: `Historia Mundial ${i - 8}` };
+            dbCodigos[`FWC${i}`] = currentId;
+            currentId++;
+        }
+        const totalStickers = currentId - 1;
+        const prefijosValidos = new Set(["FWC", ...ordenPaises]);
+        const ordenPrefijosPanini = ["00", "FWC", ...ordenPaises];
+        const indicePrefijoPanini = new Map(ordenPrefijosPanini.map((prefijo, index) => [prefijo, index]));
+
+        const separarCodigoPanini = (id) => {
+            const code = dbCorrelativos[id]?.code || "";
+            if (code === "00") {
+                return { prefijo: "00", numero: 0, code };
+            }
+            const match = code.match(/^([A-Z]{2,4})\s+(\d+)$/);
+            return {
+                prefijo: match ? match[1] : code,
+                numero: match ? Number(match[2]) : Number.MAX_SAFE_INTEGER,
+                code
+            };
+        };
+
+        const compararPorCodigoPanini = (idA, idB) => {
+            const a = separarCodigoPanini(idA);
+            const b = separarCodigoPanini(idB);
+            const ordenA = indicePrefijoPanini.has(a.prefijo) ? indicePrefijoPanini.get(a.prefijo) : Number.MAX_SAFE_INTEGER;
+            const ordenB = indicePrefijoPanini.has(b.prefijo) ? indicePrefijoPanini.get(b.prefijo) : Number.MAX_SAFE_INTEGER;
+            return ordenA - ordenB || a.numero - b.numero || a.code.localeCompare(b.code) || idA - idB;
+        };
+
+        const bytesABase64Url = (bytes) => {
+            let binary = "";
+            bytes.forEach(byte => binary += String.fromCharCode(byte));
+            return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        };
+
+        const base64UrlABytes = (texto) => {
+            const normalizado = texto.replace(/\s/g, "+").replace(/-/g, "+").replace(/_/g, "/");
+            const conRelleno = normalizado + "=".repeat((4 - normalizado.length % 4) % 4);
+            const binary = atob(conRelleno);
+            return Uint8Array.from(binary, char => char.charCodeAt(0));
+        };
+
+        const idsABitset = (ids) => {
+            const bytes = new Uint8Array(Math.ceil(totalStickers / 8));
+            ids.forEach(id => {
+                if (id >= 1 && id <= totalStickers) {
+                    const index = id - 1;
+                    bytes[Math.floor(index / 8)] |= 1 << (index % 8);
+                }
+            });
+            return bytesABase64Url(bytes);
+        };
+
+        const bitsetAIds = (texto) => {
+            const bytes = base64UrlABytes(texto);
+            const ids = [];
+            for (let index = 0; index < totalStickers; index++) {
+                if (bytes[Math.floor(index / 8)] & (1 << (index % 8))) {
+                    ids.push(index + 1);
+                }
+            }
+            return ids;
+        };
+
+        const codificarDatos = (data) => {
+            const compacto = { v: 2 };
+            if (data.n) compacto.n = data.n;
+            if (data.nB) compacto.nB = data.nB;
+            if (data.f) compacto.f = idsABitset(data.f);
+            if (data.r) compacto.r = idsABitset(data.r);
+            if (data.b_da_a) compacto.b_da_a = idsABitset(data.b_da_a);
+            if (data.a_da_b) compacto.a_da_b = idsABitset(data.a_da_b);
+            return bytesABase64Url(new TextEncoder().encode(JSON.stringify(compacto)));
+        };
+
+        const decodificarDatos = (param) => {
+            try {
+                const texto = new TextDecoder().decode(base64UrlABytes(param));
+                const data = JSON.parse(texto);
+                if (data.v === 2) {
+                    return {
+                        n: data.n,
+                        nB: data.nB,
+                        f: data.f ? bitsetAIds(data.f) : [],
+                        r: data.r ? bitsetAIds(data.r) : [],
+                        b_da_a: data.b_da_a ? bitsetAIds(data.b_da_a) : [],
+                        a_da_b: data.a_da_b ? bitsetAIds(data.a_da_b) : []
+                    };
+                }
+                return data;
+            } catch (error) {
+                return JSON.parse(decodeURIComponent(escape(atob(param.replace(/\s/g, "+")))));
+            }
+        };
+
+        // ========================================================
+        // 2. MOTOR DE PARSEO INTELIGENTE
+        // ========================================================
+        const detectarSeccionLista = (linea) => {
+            const limpio = linea
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^A-Za-z\s]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase();
+
+            if (/^(i\s+need|need|needs|missing|faltan|falta|busco|necesito)\b/.test(limpio)) return "faltan";
+            if (/^(swaps?|swap|dupes?|duplicates?|repeated|repetidas?|repetidos?|tengo)\b/.test(limpio)) return "repetidas";
+            return null;
+        };
+
+        const extraerIdsDeLineaConPrefijo = (linea) => {
+            const matchCeroCero = linea.match(/^\s*00\s*$/);
+            if (matchCeroCero) {
+                return [dbCodigos["00"]];
+            }
+
+            const matchPrefijo = linea.match(/^\s*([A-Za-z]{2,4})\b(.*)$/);
+            if (!matchPrefijo) return null;
+
+            const prefijo = matchPrefijo[1].toUpperCase();
+            if (!prefijosValidos.has(prefijo)) return null;
+
+            const numeros = matchPrefijo[2].match(/\d+/g);
+            if (!numeros) return [];
+
+            return numeros
+                .map(numStr => dbCodigos[`${prefijo}${Number(numStr)}`])
+                .filter(Boolean);
+        };
+
+        const procesarTextoAStickers = (texto, tipoLista = null) => {
+            if (!texto) return [];
+            const idsEncontrados = new Set();
+            const lineas = texto.replace(/\r/g, "\n").split("\n");
+            const lineasPorSeccion = [];
+            let seccionActual = null;
+            let encontroSeccionObjetivo = false;
+
+            lineas.forEach(lineaOriginal => {
+                const linea = lineaOriginal.trim();
+                if (!linea) return;
+
+                const nuevaSeccion = detectarSeccionLista(linea);
+                if (nuevaSeccion) {
+                    seccionActual = nuevaSeccion;
+                    if (tipoLista && nuevaSeccion === tipoLista) encontroSeccionObjetivo = true;
+                    return;
+                }
+
+                lineasPorSeccion.push({ linea, seccion: seccionActual });
+            });
+
+            const lineasAProcesar = tipoLista && encontroSeccionObjetivo
+                ? lineasPorSeccion.filter(item => item.seccion === tipoLista).map(item => item.linea)
+                : lineasPorSeccion.map(item => item.linea);
+
+            let textoLimpio = "";
+
+            lineasAProcesar.forEach(linea => {
+                const idsLinea = extraerIdsDeLineaConPrefijo(linea);
+                if (idsLinea) {
+                    idsLinea.forEach(id => idsEncontrados.add(id));
+                    return;
+                }
+
+                textoLimpio += ` ${linea}`;
+            });
+
+            textoLimpio = textoLimpio.replace(/(^|\D)00(?=\D|$)/g, (match, previo) => {
+                idsEncontrados.add(dbCodigos["00"]);
+                return previo || " ";
+            });
+
+            const regexLetrasNumeros = /([A-Za-z]+)\s*(\d+)/g;
+            const coincidenciasCodigo = [...textoLimpio.matchAll(regexLetrasNumeros)];
+            coincidenciasCodigo.forEach(match => {
+                const llave = (match[1] + match[2]).toUpperCase();
+                if (dbCodigos[llave]) {
+                    idsEncontrados.add(dbCodigos[llave]);
+                }
+            });
+            textoLimpio = textoLimpio.replace(regexLetrasNumeros, (valor, letras, numeros) => {
+                return dbCodigos[(letras + numeros).toUpperCase()] ? " " : valor;
+            });
+
+            const numerosSueltos = textoLimpio.match(/\d+/g);
+            if (numerosSueltos) {
+                numerosSueltos.forEach(numStr => {
+                    const id = Number(numStr);
+                    if (dbCorrelativos[id]) {
+                        idsEncontrados.add(id);
+                    }
+                });
+            }
+
+            return [...idsEncontrados].sort(compararPorCodigoPanini);
+        };
+
+        let textoGlobal_B_da_A = "";
+        let textoGlobal_A_da_B = "";
+
+        // Helpers de Copiado
+        const copiarAlPortapapeles = (idInput, idBoton) => {
+            const el = document.getElementById(idInput);
+            el.select();
+            el.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(el.value).then(() => {
+                const btn = document.getElementById(idBoton);
+                const textoOriginal = btn.innerHTML;
+                btn.innerHTML = "¡Copiado! ✓";
+                btn.classList.add("bg-emerald-600");
+                setTimeout(() => {
+                    btn.innerHTML = textoOriginal;
+                    btn.classList.remove("bg-emerald-600");
+                }, 2000);
+            });
+        };
+
+        const copiarTextoDirecto = (texto, idBoton) => {
+            navigator.clipboard.writeText(texto).then(() => {
+                const btn = document.getElementById(idBoton);
+                const textoOriginal = btn.innerHTML;
+                btn.innerHTML = "¡Copiado! ✓";
+                btn.classList.replace("bg-slate-800", "bg-emerald-600");
+                setTimeout(() => {
+                    btn.innerHTML = textoOriginal;
+                    btn.classList.replace("bg-emerald-600", "bg-slate-800");
+                }, 2000);
+            });
+        };
+
+        const construirHtmlLista = (listaIds) => {
+            if (listaIds.length === 0) {
+                return `<p class="text-slate-400 italic text-center text-[11px] py-1">Ninguna coincidencia.</p>`;
+            }
+            let html = "";
+            [...listaIds].sort(compararPorCodigoPanini).forEach(id => {
+                const c = dbCorrelativos[id];
+                html += `<div class="flex justify-between py-1 border-b border-slate-100 last:border-0 text-[11px]">
+                    <span class="font-bold text-slate-700">${c.code}</span>
+                    <span class="text-slate-400 text-[10px]">${c.desc}</span>
+                </div>`;
+            });
+            return html;
+        };
+
+        const normalizarListaIds = (ids) => {
+            if (!Array.isArray(ids)) return [];
+            return [...new Set(ids.map(Number).filter(id => dbCorrelativos[id]))].sort(compararPorCodigoPanini);
+        };
+
+        const intersectarListas = (listaA, listaB) => {
+            const setB = new Set(listaB);
+            return listaA.filter(id => setB.has(id));
+        };
+
+        const diferenciaListas = (listaA, listaB) => {
+            const setB = new Set(listaB);
+            return listaA.filter(id => !setB.has(id));
+        };
+
+        const construirResumenCodigos = (ids, max = 10) => {
+            if (!ids.length) return "";
+            const codigos = [...ids].sort(compararPorCodigoPanini).slice(0, max).map(id => dbCorrelativos[id].code).join(", ");
+            return ids.length > max ? `${codigos} y ${ids.length - max} más` : codigos;
+        };
+
+        const construirHtmlQaCruce = ({ nombreA, aliasB, faltanA, repetidasA, faltanB, repetidasB, b_da_a, a_da_b }) => {
+            const problemas = [];
+            const ok = [];
+
+            const conflictoA = intersectarListas(faltanA, repetidasA);
+            const conflictoB = intersectarListas(faltanB, repetidasB);
+            const bSinFaltanteA = diferenciaListas(b_da_a, faltanA);
+            const bSinRepetidaB = diferenciaListas(b_da_a, repetidasB);
+            const aSinRepetidaA = diferenciaListas(a_da_b, repetidasA);
+            const aSinFaltanteB = diferenciaListas(a_da_b, faltanB);
+
+            if (conflictoA.length) problemas.push(`${nombreA} tiene la misma estampa como faltante y repetida: ${construirResumenCodigos(conflictoA)}.`);
+            if (conflictoB.length) problemas.push(`${aliasB} tiene la misma estampa como faltante y repetida: ${construirResumenCodigos(conflictoB)}.`);
+            if (bSinFaltanteA.length) problemas.push(`Hay sugerencias para ${nombreA} que no están en sus faltantes: ${construirResumenCodigos(bSinFaltanteA)}.`);
+            if (bSinRepetidaB.length) problemas.push(`Hay sugerencias que ${aliasB} no tiene repetidas: ${construirResumenCodigos(bSinRepetidaB)}.`);
+            if (aSinRepetidaA.length) problemas.push(`Hay sugerencias que ${nombreA} no tiene repetidas: ${construirResumenCodigos(aSinRepetidaA)}.`);
+            if (aSinFaltanteB.length) problemas.push(`Hay sugerencias para ${aliasB} que no están en sus faltantes: ${construirResumenCodigos(aSinFaltanteB)}.`);
+
+            if (!bSinFaltanteA.length && !bSinRepetidaB.length) ok.push(`Las ${b_da_a.length} que ${aliasB} daría sí cruzan contra faltantes de ${nombreA}.`);
+            if (!aSinRepetidaA.length && !aSinFaltanteB.length) ok.push(`Las ${a_da_b.length} que ${nombreA} daría sí cruzan contra faltantes de ${aliasB}.`);
+
+            const estadoOk = problemas.length === 0;
+            const clasePanel = estadoOk
+                ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                : "bg-amber-50 border-amber-200 text-amber-800";
+            const titulo = estadoOk ? "QA aprobado" : "QA con advertencias";
+            const detalleProblemas = problemas.map(msg => `<li>${msg}</li>`).join("");
+            const detalleOk = ok.map(msg => `<li>${msg}</li>`).join("");
+
+            return `
+                <div class="${clasePanel} border p-3 rounded-xl space-y-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-[10px] font-bold uppercase tracking-wider">${titulo}</p>
+                        <p class="text-[10px] font-bold">${b_da_a.length + a_da_b.length} coincidencias</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-600">
+                        <div class="bg-white/70 rounded-lg p-2">Faltan ${nombreA}: <b>${faltanA.length}</b><br>Repetidas ${nombreA}: <b>${repetidasA.length}</b></div>
+                        <div class="bg-white/70 rounded-lg p-2">Faltan ${aliasB}: <b>${faltanB.length}</b><br>Repetidas ${aliasB}: <b>${repetidasB.length}</b></div>
+                    </div>
+                    ${detalleProblemas ? `<ul class="list-disc pl-4 text-[10px] space-y-1">${detalleProblemas}</ul>` : ""}
+                    ${detalleOk ? `<ul class="list-disc pl-4 text-[10px] space-y-1">${detalleOk}</ul>` : ""}
+                </div>
+            `;
+        };
+
+        const appUrlPublica = "https://panini-iota.vercel.app";
+
+        const construirTextoMensaje = (titulo, listaIds) => {
+            let txt = `He utilizado Copa Mundial 2026 Matcher para validar nuestro intercambio de estampas y esto ha devuelto:\n\n`;
+            txt += `${titulo}\n`;
+            if (listaIds.length === 0) {
+                txt += "- Ninguna coincidencia.";
+            } else {
+                [...listaIds].sort(compararPorCodigoPanini).forEach(id => {
+                    const c = dbCorrelativos[id];
+                    txt += `• ${c.code} (${c.desc})\n`;
+                });
+            }
+            txt += `\nPuedes generar tu propio cruce de estampas aquí:\n${appUrlPublica}`;
+            return txt;
+        };
+
+        const albumesDisponibles = [
+            { id: "usa-mex-can-26", nombre: "Usa Mex Can 26" }
+        ];
+
+        const estadoAlbumKey = (albumId) => `panini-control-${albumId}`;
+        const estadoEstampas = {};
+        let albumActivo = albumesDisponibles[0].id;
+        let filtroAlbum = "all";
+        let busquedaAlbum = "";
+        let estampaSeleccionadaId = null;
+        let scannerStream = null;
+        let scannerAbierto = false;
+        let scannerResultadoId = null;
+        let scannerTextoOcr = "";
+        let scannerLeyendo = false;
+        let scannerLoopTimer = null;
+        let sesionUsuario = null;
+        let vistaActiva = "album";
+
+        const sesionKey = "panini-session";
+        const apiCliente = {
+            obtenerEstadoAlbum: async (albumId) => JSON.parse(localStorage.getItem(estadoAlbumKey(albumId)) || "{}"),
+            guardarEstadoAlbum: async (albumId, estado) => localStorage.setItem(estadoAlbumKey(albumId), JSON.stringify(estado))
+        };
+
+        const obtenerSeccionesAlbum = () => {
+            const secciones = [
+                { id: "fwc-specials", titulo: "FWC - Specials", icono: "🏆", ids: [1, 2, 3, 4, 5] },
+                { id: "fwc-ball", titulo: "FWC - Ball & Countries", icono: "🌎", ids: [6, 7, 8, 9] },
+                { id: "fwc-history", titulo: "FWC - History", icono: "📜", ids: Object.keys(dbCorrelativos).map(Number).filter(id => dbCorrelativos[id].code.startsWith("FWC ") && Number(dbCorrelativos[id].code.split(" ")[1]) >= 9).sort(compararPorCodigoPanini) }
+            ];
+
+            ordenPaises.forEach(pais => {
+                secciones.push({
+                    id: `pais-${pais}`,
+                    titulo: pais,
+                    icono: "",
+                    ids: Object.keys(dbCorrelativos).map(Number).filter(id => dbCorrelativos[id].code.startsWith(`${pais} `)).sort(compararPorCodigoPanini)
+                });
+            });
+
+            return secciones;
+        };
+
+        const cargarSesion = () => {
+            try {
+                sesionUsuario = JSON.parse(localStorage.getItem(sesionKey) || "null");
+            } catch (error) {
+                sesionUsuario = null;
+            }
+        };
+
+        const renderizarSesion = () => {
+            const panel = document.getElementById("sessionPanel");
+            if (!panel) return;
+
+            if (sesionUsuario?.nombre) {
+                panel.innerHTML = `
+                    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Sesión local</p>
+                            <p class="text-sm font-bold text-slate-800">${escaparHtml(sesionUsuario.nombre)}</p>
+                            <p class="text-[10px] text-slate-500">Preparado para sincronizar con backend cuando esté disponible.</p>
+                        </div>
+                        <button type="button" onclick="cerrarSesionLocal()" class="bg-white border border-indigo-200 text-indigo-700 font-bold px-3 py-2 rounded-lg text-xs">Salir</button>
+                    </div>
+                `;
+                const nombreInput = document.getElementById("nombreA");
+                if (nombreInput && !nombreInput.value.trim()) nombreInput.value = sesionUsuario.nombre;
+                return;
+            }
+
+            panel.innerHTML = `
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                    <div>
+                        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Cuenta</p>
+                        <p class="text-xs text-slate-500">Reserva para login. Por ahora guarda tu sesión en este dispositivo.</p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input id="sessionName" class="bg-white border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="Tu nombre">
+                        <input id="sessionEmail" class="bg-white border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="Email opcional">
+                    </div>
+                    <label class="flex items-center gap-2 text-xs text-slate-600">
+                        <input id="sessionRemember" type="checkbox" checked class="rounded border-slate-300">
+                        Mantener sesión abierta en este dispositivo
+                    </label>
+                    <button type="button" onclick="iniciarSesionLocal()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">Continuar</button>
+                </div>
+            `;
+        };
+
+        const cargarEstadoAlbum = async (albumId) => {
+            try {
+                const guardado = await apiCliente.obtenerEstadoAlbum(albumId);
+                Object.keys(estadoEstampas).forEach(key => delete estadoEstampas[key]);
+                Object.entries(guardado).forEach(([id, cantidad]) => {
+                    const cantidadNumerica = Number(cantidad);
+                    if (dbCorrelativos[Number(id)] && Number.isInteger(cantidadNumerica) && cantidadNumerica > 0) {
+                        estadoEstampas[id] = cantidadNumerica;
+                    }
+                });
+            } catch (error) {
+                Object.keys(estadoEstampas).forEach(key => delete estadoEstampas[key]);
+            }
+        };
+
+        const guardarEstadoAlbum = () => {
+            apiCliente.guardarEstadoAlbum(albumActivo, estadoEstampas);
+        };
+
+        const obtenerIdsPorEstado = (estado) => {
+            return Object.entries(estadoEstampas)
+                .filter(([, valor]) => estado === 2 ? valor >= 2 : valor === estado)
+                .map(([id]) => Number(id))
+                .filter(id => dbCorrelativos[id])
+                .sort(compararPorCodigoPanini);
+        };
+
+        const obtenerIdsTengo = () => {
+            return Object.entries(estadoEstampas)
+                .filter(([, valor]) => valor >= 1)
+                .map(([id]) => Number(id))
+                .filter(id => dbCorrelativos[id])
+                .sort(compararPorCodigoPanini);
+        };
+
+        const obtenerIdsFaltanAlbum = () => {
+            return Object.keys(dbCorrelativos)
+                .map(Number)
+                .filter(id => !estadoEstampas[id])
+                .sort(compararPorCodigoPanini);
+        };
+
+        const construirTextoCodigos = (ids) => {
+            return [...ids].sort(compararPorCodigoPanini).map(id => dbCorrelativos[id].code).join(", ");
+        };
+
+        const construirTextoIntercambio = (ids) => {
+            return [...ids].sort(compararPorCodigoPanini).map(id => {
+                const disponibles = Math.max((estadoEstampas[id] || 0) - 1, 1);
+                const codigo = dbCorrelativos[id].code;
+                return disponibles > 1 ? `${codigo} x${disponibles}` : codigo;
+            }).join(", ");
+        };
+
+        const escaparHtml = (texto) => String(texto)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+
+        const etiquetaNumeroEstampa = (id) => {
+            const code = dbCorrelativos[id].code;
+            if (code === "00") return "00";
+            return code.split(" ")[1] || code;
+        };
+
+        const renderizarControlAlbum = () => {
+            const raiz = document.getElementById("albumControl");
+            if (!raiz) return;
+
+            const idsTengo = obtenerIdsTengo();
+            const idsSwaps = obtenerIdsPorEstado(2);
+            const idsNeed = obtenerIdsFaltanAlbum();
+            const total = Object.keys(dbCorrelativos).length;
+            const secciones = obtenerSeccionesAlbum();
+            const query = busquedaAlbum.trim().toUpperCase();
+
+            const coincideFiltro = (id) => {
+                const cantidad = estadoEstampas[id] || 0;
+                if (filtroAlbum === "need") return cantidad === 0;
+                if (filtroAlbum === "owned") return cantidad >= 1;
+                if (filtroAlbum === "swaps") return cantidad >= 2;
+                return true;
+            };
+
+            const coincideBusqueda = (id) => {
+                if (!query) return true;
+                const item = dbCorrelativos[id];
+                return item.code.replace(/\s+/g, "").includes(query.replace(/\s+/g, "")) || item.code.includes(query) || item.desc.toUpperCase().includes(query);
+            };
+
+            const htmlSecciones = secciones.map(seccion => {
+                const idsVisibles = seccion.ids.filter(id => coincideFiltro(id) && coincideBusqueda(id));
+                if (!idsVisibles.length) return "";
+
+                const botones = idsVisibles.map(id => {
+                    const cantidad = estadoEstampas[id] || 0;
+                    const claseEstado = cantidad >= 2 ? "sticker-swap" : cantidad === 1 ? "sticker-owned" : "sticker-need";
+                    const aria = cantidad >= 2 ? `${cantidad - 1} para intercambio` : cantidad === 1 ? "ya tengo" : "me falta";
+                    const badge = cantidad >= 2 ? `<span class="copy-badge">x${cantidad}</span>` : "";
+                    const seleccionado = estampaSeleccionadaId === id;
+                    const controles = seleccionado ? `
+                        <div class="sticker-quantity-controls" aria-label="Ajustar cantidad de ${dbCorrelativos[id].code}">
+                            <button type="button" onclick="event.stopPropagation(); ajustarCantidadEstampa(${id}, -1)" title="Quitar una copia">−</button>
+                            <button type="button" onclick="event.stopPropagation(); ajustarCantidadEstampa(${id}, 1)" title="Agregar una copia">+</button>
+                        </div>
+                    ` : "";
+                    return `
+                        <div class="sticker-cell">
+                            ${controles}
+                            <button type="button" onclick="seleccionarEstampa(${id})" title="${dbCorrelativos[id].code} - ${aria}" class="sticker-token ${claseEstado} ${seleccionado ? "sticker-token-selected" : ""}">${etiquetaNumeroEstampa(id)}${badge}</button>
+                        </div>
+                    `;
+                }).join("");
+
+                return `
+                    <section class="border-t border-slate-200 pt-4 first:border-t-0 first:pt-0">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-sm font-bold text-slate-900">${seccion.titulo} <span class="text-slate-400">${seccion.icono}</span></h3>
+                            <span class="text-[10px] font-bold text-slate-400">${idsVisibles.length}</span>
+                        </div>
+                        <div class="grid grid-cols-5 sm:grid-cols-8 gap-2">${botones}</div>
+                    </section>
+                `;
+            }).join("");
+
+            raiz.innerHTML = `
+                <div class="space-y-4">
+                    <div class="space-y-2">
+                        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Álbum</label>
+                        <select id="albumSelector" onchange="cambiarAlbum(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-sm font-bold focus:outline-none focus:border-indigo-600">
+                            ${albumesDisponibles.map(album => `<option value="${album.id}" ${album.id === albumActivo ? "selected" : ""}>${album.nombre}</option>`).join("")}
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+                            <p class="text-[9px] text-slate-400 font-bold uppercase">Ya tengo</p>
+                            <p class="text-lg font-black text-emerald-700">${idsTengo.length}</p>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+                            <p class="text-[9px] text-slate-400 font-bold uppercase">Intercambio</p>
+                            <p class="text-lg font-black text-orange-700">${idsSwaps.length}</p>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-2">
+                            <p class="text-[9px] text-slate-400 font-bold uppercase">Faltan</p>
+                            <p class="text-lg font-black text-rose-700">${idsNeed.length}</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-4 gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
+                        ${[
+                            ["all", "Todas"],
+                            ["need", "Faltan"],
+                            ["owned", "Tengo"],
+                            ["swaps", "Cambio"]
+                        ].map(([valor, label]) => `<button type="button" onclick="setFiltroAlbum('${valor}')" class="py-2 rounded-lg text-[11px] font-bold ${filtroAlbum === valor ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}">${label}</button>`).join("")}
+                    </div>
+
+                    <p class="text-[10px] text-slate-500 leading-relaxed">
+                        Toca una estampa y usa − / + para ajustar cuántas tienes. Con 2 o más, entra a intercambio.
+                    </p>
+
+                    <div class="flex gap-2">
+                        <input id="busquedaAlbum" value="${escaparHtml(busquedaAlbum)}" oninput="buscarEnAlbum(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="Buscar: FWC 9, MEX 13...">
+                        <button type="button" onclick="limpiarBusquedaAlbum()" class="bg-slate-100 border border-slate-300 text-slate-600 font-bold px-3 rounded-xl text-xs">Limpiar</button>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button type="button" onclick="usarListasDelAlbum()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-tournament py-2.5 px-3 rounded-xl text-xs transition shadow shadow-indigo-100">Usar estas listas</button>
+                        <button type="button" onclick="cambiarVista('scanner')" class="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">Escanear</button>
+                        <button type="button" onclick="reiniciarAlbum()" class="bg-white border border-slate-300 text-slate-600 font-bold py-2.5 px-3 rounded-xl text-xs">Reiniciar</button>
+                    </div>
+
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                        <div>
+                            <p class="text-[10px] font-bold uppercase text-emerald-700">Ya tengo</p>
+                            <p class="text-[10px] text-slate-500 leading-relaxed">${construirTextoCodigos(idsTengo) || "Sin estampas marcadas."}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-bold uppercase text-orange-700">Para intercambiar</p>
+                            <p class="text-[10px] text-slate-500 leading-relaxed">${construirTextoIntercambio(idsSwaps) || "Sin repetidas marcadas."}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-bold uppercase text-rose-700">Me faltan</p>
+                            <p class="text-[10px] text-slate-500 leading-relaxed max-h-16 overflow-y-auto">${construirTextoCodigos(idsNeed) || "Álbum completo."}</p>
+                        </div>
+                    </div>
+
+                    <div class="space-y-5 max-h-[560px] overflow-y-auto pr-1">${htmlSecciones || `<p class="text-center text-xs text-slate-400 py-6">No hay estampas con ese filtro.</p>`}</div>
+                </div>
+            `;
+        };
+
+        // ========================================================
+        // 3. ENRUTADOR DINÁMICO DE PANTALLAS
+        // ========================================================
+        const urlParams = new URLSearchParams(window.location.search);
+        const dataParam = urlParams.get('p');
+        const modeParam = urlParams.get('m');
+        const container = document.getElementById('app-container');
+
+        function renderizarNavegacionPrincipal() {
+            const nav = document.getElementById("mainNav");
+            if (!nav) return;
+
+            const vistas = [
+                ["album", "Álbum"],
+                ["scanner", "Escáner"],
+                ["trade", "Intercambio"],
+                ["account", "Cuenta"]
+            ];
+
+            nav.innerHTML = vistas.map(([id, label]) => `
+                <button type="button" onclick="cambiarVista('${id}')" class="py-2 rounded-lg text-[11px] font-bold ${vistaActiva === id ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}">
+                    ${label}
+                </button>
+            `).join("");
+        }
+
+        function mostrarVista(vista) {
+            document.querySelectorAll(".app-view").forEach(panel => {
+                panel.classList.toggle("hidden", panel.id !== `view-${vista}`);
+            });
+            renderizarNavegacionPrincipal();
+        }
+
+        window.cambiarVista = (vista) => {
+            vistaActiva = vista;
+            mostrarVista(vistaActiva);
+            if (vista === "scanner") {
+                abrirEscaner();
+            } else if (scannerAbierto) {
+                cerrarEscaner();
+            }
+        };
+
+        if (!dataParam) {
+            // PANTALLA 1: CREADOR PRINCIPAL (SUJETO A)
+            container.innerHTML = `
+                <div class="space-y-4">
+                    <div class="border-b border-slate-200 pb-2.5">
+                        <h2 class="text-base font-tournament text-indigo-700">Panel de Colección</h2>
+                        <p class="text-xs text-slate-500">Controla tu álbum, escanea estampas y genera intercambios desde vistas separadas.</p>
+                    </div>
+
+                    <nav id="mainNav" class="grid grid-cols-4 gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1"></nav>
+
+                    <div id="view-album" class="app-view space-y-4">
+                        <div id="albumControl" class="bg-white rounded-xl"></div>
+                    </div>
+
+                    <div id="view-scanner" class="app-view hidden space-y-4">
+                        <div id="scannerPanel" class="bg-slate-950 text-white rounded-xl p-3 space-y-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div>
+                                    <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-200">Escáner OCR en vivo</p>
+                                    <p class="text-[10px] text-slate-300">Enfoca solo el código Panini. Cuando lo lea, aparece el resultado.</p>
+                                </div>
+                                <button type="button" onclick="cerrarEscaner()" class="bg-white/10 hover:bg-white/20 text-white rounded-lg px-2 py-1 text-xs font-bold">Apagar</button>
+                            </div>
+                            <div class="scanner-frame">
+                                <video id="scannerVideo" class="w-full aspect-video object-cover" autoplay playsinline muted></video>
+                            </div>
+                            <canvas id="scannerCanvas" class="hidden"></canvas>
+                            <div id="scannerStatus" class="text-[11px] text-slate-300 leading-relaxed">Entrando al escáner...</div>
+                            <div class="flex gap-2">
+                                <input id="scannerManualCode" class="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-indigo-300" placeholder="Si no lee: MEX 13, FWC 9, 00">
+                                <button type="button" onclick="buscarCodigoManualEscaner()" class="bg-white text-slate-900 font-bold px-3 rounded-xl text-xs">Buscar</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="view-trade" class="app-view hidden space-y-4">
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">👤 Tu Nombre:</label>
+                            <input id="nombreA" type="text" maxlength="20" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600 font-medium" placeholder="Ej: Juan">
+                        </div>
+
+                        <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div>
+                                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-600">Listas para compartir</p>
+                                    <p class="text-xs text-slate-500">Puedes usar las listas generadas por el álbum o pegar listas manuales.</p>
+                                </div>
+                                <button type="button" onclick="usarListasDelAlbum()" class="bg-white border border-slate-300 text-slate-700 font-bold px-3 py-2 rounded-lg text-xs">Traer del álbum</button>
+                            </div>
+
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-wider text-rose-600 mb-1">❌ Las Estampas que TE FALTAN:</label>
+                                <textarea id="faltanA" rows="3" class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="Pega tu texto o números sueltos... Ej: 10, 42, ALG 10"></textarea>
+                            </div>
+
+                            <div>
+                                <label class="block text-[10px] font-bold uppercase tracking-wider text-emerald-600 mb-1">🔄 Las que TIENES REPETIDAS:</label>
+                                <textarea id="repetidasA" rows="3" class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="Pega tu texto... Ej: FWC 5, MEX 13, 90"></textarea>
+                            </div>
+                        </div>
+
+                        <button onclick="generarPase()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-tournament py-3 px-4 rounded-xl text-sm transition shadow shadow-indigo-200 cursor-pointer">
+                            Generar Enlace e Intercambio 🔗
+                        </button>
+
+                        <div id="resultadoA" class="hidden space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200 animate-fade-in">
+                            <div class="space-y-1">
+                                <p class="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">¡Enlace Creado con éxito!</p>
+                                <div class="flex gap-2">
+                                    <input id="inputLink" type="text" readonly class="w-full bg-white border border-slate-300 rounded-lg p-2 text-xs text-indigo-700 font-mono focus:outline-none">
+                                    <button id="btnCopiarLink" onclick="copiarAlPortapapeles('inputLink', 'btnCopiarLink')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 rounded-lg transition shrink-0 cursor-pointer">Copiar</button>
+                                </div>
+                                <p id="avisoQrLocal" class="hidden text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed"></p>
+                            </div>
+                            
+                            <div class="flex flex-col items-center justify-center pt-3 border-t border-slate-200 space-y-2">
+                                <p class="text-[10px] text-slate-500 font-medium">O pídele que escanee este código QR directo en tu pantalla:</p>
+                                <div id="qrContainer" class="bg-white p-3 rounded-lg border border-slate-200 shadow-sm flex items-center justify-center w-[244px] h-[244px]">
+                                    <div id="qrCode" class="w-[220px] h-[220px] flex items-center justify-center text-center text-[11px] text-slate-500 leading-relaxed"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="view-account" class="app-view hidden space-y-4">
+                        <div id="sessionPanel"></div>
+                    </div>
+                </div>
+            `;
+            cargarSesion();
+            renderizarSesion();
+            cargarEstadoAlbum(albumActivo).then(renderizarControlAlbum);
+            renderizarNavegacionPrincipal();
+            mostrarVista(vistaActiva);
+        } else if (modeParam === 'r') {
+            // PANTALLA 3: MODO LECTURA DE RESPUESTA FINAL
+            try {
+                const finalData = decodificarDatos(dataParam);
+
+                textoGlobal_B_da_A = construirTextoMensaje(`🏆 Repetidas de ${finalData.nB} que te puede dar a ti:`, finalData.b_da_a);
+                textoGlobal_A_da_B = construirTextoMensaje(`🏆 Repetidas tuyas que le puedes dar a ${finalData.nB}:`, finalData.a_da_b);
+
+                container.innerHTML = `
+                    <div class="space-y-4 animate-fade-in">
+                        <div class="border-b border-slate-200 pb-2.5">
+                            <div class="inline-flex px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-[9px] font-bold uppercase tracking-widest mb-1">
+                                Intercambio Calculado
+                            </div>
+                            <h2 class="text-sm font-tournament text-slate-700">¡Resultados listos con <span class="text-indigo-600">${finalData.nB}</span>!</h2>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                <div class="flex justify-between items-center mb-2">
+                                    <div>
+                                        <h3 class="text-[10px] font-bold uppercase text-emerald-600 tracking-wider">🎁 Lo que ${finalData.nB} te puede dar a ti:</h3>
+                                        <p class="text-[10px] text-slate-500 font-bold mt-0.5">${finalData.b_da_a.length} en total</p>
+                                    </div>
+                                    <button id="btnCopTxt1" onclick="copiarTextoDirecto(textoGlobal_B_da_A, 'btnCopTxt1')" class="bg-slate-800 text-white text-[9px] font-bold py-1 px-2 rounded hover:bg-slate-700 cursor-pointer">Copiar Lista</button>
+                                </div>
+                                <div class="text-xs space-y-1 font-mono max-h-36 overflow-y-auto bg-white border border-slate-200 p-2 rounded-lg">${construirHtmlLista(finalData.b_da_a)}</div>
+                            </div>
+
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                <div class="flex justify-between items-center mb-2">
+                                    <div>
+                                        <h3 class="text-[10px] font-bold uppercase text-indigo-600 tracking-wider">🤝 Lo que tú le puedes dar a ${finalData.nB}:</h3>
+                                        <p class="text-[10px] text-slate-500 font-bold mt-0.5">${finalData.a_da_b.length} en total</p>
+                                    </div>
+                                    <button id="btnCopTxt2" onclick="copiarTextoDirecto(textoGlobal_A_da_B, 'btnCopTxt2')" class="bg-slate-800 text-white text-[9px] font-bold py-1 px-2 rounded hover:bg-slate-700 cursor-pointer">Copiar Lista</button>
+                                </div>
+                                <div class="text-xs space-y-1 font-mono max-h-36 overflow-y-auto bg-white border border-slate-200 p-2 rounded-lg">${construirHtmlLista(finalData.a_da_b)}</div>
+                            </div>
+                        </div>
+
+                        <button onclick="window.location.href=window.location.pathname" class="w-full bg-slate-700 text-white font-tournament py-2 px-4 rounded-xl text-xs tracking-wide transition cursor-pointer">
+                            Crear una Nueva Lista 🔄
+                        </button>
+                    </div>
+                `;
+            } catch (e) {
+                container.innerHTML = `<p class="text-rose-600 text-xs text-center p-4">Error al interpretar el enlace de respuesta.</p>`;
+            }
+        } else {
+            // PANTALLA 2: COMPAÑERO (SUJETO B)
+            let nombreAnfitrion = "Compañero";
+            let dataA = { f: [], r: [] };
+            try {
+                dataA = decodificarDatos(dataParam);
+                if (dataA.n) nombreAnfitrion = dataA.n;
+            } catch (e) { }
+
+            container.innerHTML = `
+                <div class="space-y-4">
+                    <div class="border-b border-slate-200 pb-2">
+                        <div class="inline-flex px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[9px] font-bold uppercase tracking-widest mb-1">Conectado</div>
+                        <h2 class="text-sm font-tournament text-slate-700">Intercambio con: <span class="text-indigo-600">${nombreAnfitrion}</span></h2>
+                        <p class="text-xs text-slate-500">Pega tus listas para calcular las coincidencias mutuas.</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">👤 Tu Nombre:</label>
+                        <input id="nombreB" type="text" maxlength="20" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600 font-medium" placeholder="Ej: Carlos">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-wider text-rose-600 mb-1">❌ Las que TE FALTAN (A ti):</label>
+                        <textarea id="faltanB" rows="3" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="Pega tu texto aquí..."></textarea>
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold uppercase tracking-wider text-emerald-600 mb-1">🔄 Las que TIENES REPETIDAS:</label>
+                        <textarea id="repetidasB" rows="3" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="Pega tu texto aquí..."></textarea>
+                    </div>
+
+                    <button onclick="calcularCruce('${nombreAnfitrion}', decodeURIComponent('${encodeURIComponent(JSON.stringify(dataA))}'))" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-tournament py-3 px-4 rounded-xl text-sm transition shadow cursor-pointer">
+                        Calcular Intercambio Perfecto ⚡
+                    </button>
+
+                    <div id="resultadoCruce" class="hidden space-y-4 animate-fade-in">
+                        
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <div class="flex justify-between items-center mb-1.5">
+                                <div>
+                                    <h3 id="tit_B_da_A" class="text-[10px] font-bold uppercase text-emerald-600 tracking-wider">Lo que tú le puedes dar:</h3>
+                                    <p id="total_B_da_A" class="text-[10px] text-slate-500 font-bold mt-0.5">0 en total</p>
+                                </div>
+                                <button id="btnCopiarTxtB" onclick="copiarTextoDirecto(textoGlobal_B_da_A, 'btnCopiarTxtB')" class="bg-slate-800 text-white text-[9px] font-bold py-1 px-2 rounded hover:bg-slate-700 cursor-pointer">Copiar para WhatsApp 📋</button>
+                            </div>
+                            <div id="listaB_da_A" class="text-xs space-y-1 font-mono max-h-36 overflow-y-auto bg-white border border-slate-200 p-2 rounded-lg"></div>
+                        </div>
+
+                        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <div class="flex justify-between items-center mb-1.5">
+                                <div>
+                                    <h3 id="tit_A_da_B" class="text-[10px] font-bold uppercase text-indigo-600 tracking-wider">Lo que te puede dar a ti:</h3>
+                                    <p id="total_A_da_B" class="text-[10px] text-slate-500 font-bold mt-0.5">0 en total</p>
+                                </div>
+                                <button id="btnCopiarTxtA" onclick="copiarTextoDirecto(textoGlobal_A_da_B, 'btnCopiarTxtA')" class="bg-slate-800 text-white text-[9px] font-bold py-1 px-2 rounded hover:bg-slate-700 cursor-pointer">Copiar para WhatsApp 📋</button>
+                            </div>
+                            <div id="listaA_da_B" class="text-xs space-y-1 font-mono max-h-36 overflow-y-auto bg-white border border-slate-200 p-2 rounded-lg"></div>
+                        </div>
+
+                        <div id="qaCruce"></div>
+
+                        <div class="bg-indigo-50 border border-indigo-200 p-3 rounded-xl space-y-2">
+                            <p class="text-[10px] text-indigo-800 font-bold uppercase tracking-wider">🔗 Comparte este resultado de vuelta con ${nombreAnfitrion}:</p>
+                            <div class="flex gap-2">
+                                <input id="inputLinkRespuesta" type="text" readonly class="w-full bg-white border border-indigo-300 rounded-lg p-2 text-xs text-indigo-700 font-mono focus:outline-none">
+                                <button id="btnCopiarRespuesta" onclick="copiarAlPortapapeles('inputLinkRespuesta', 'btnCopiarRespuesta')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-2.5 rounded-lg transition shrink-0 cursor-pointer">Copiar Link</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ========================================================
+        // 4. LÓGICA DE PROCESAMIENTO (SUJETO A)
+        // ========================================================
+        window.generarPase = () => {
+            const alias = document.getElementById('nombreA').value.trim() || "Coleccionista A";
+            const faltanInput = document.getElementById('faltanA');
+            const repetidasInput = document.getElementById('repetidasA');
+            const hayControlAlbum = Boolean(document.getElementById("albumControl"));
+            const hayMarcasAlbum = Object.keys(estadoEstampas).length > 0;
+
+            if (hayControlAlbum && hayMarcasAlbum && !faltanInput.value.trim() && !repetidasInput.value.trim()) {
+                faltanInput.value = construirTextoCodigos(obtenerIdsFaltanAlbum());
+                repetidasInput.value = construirTextoCodigos(obtenerIdsPorEstado(2));
+            }
+
+            const faltanIds = procesarTextoAStickers(faltanInput.value, "faltan");
+            const repetidasIds = procesarTextoAStickers(repetidasInput.value, "repetidas");
+            const conflictoPropio = intersectarListas(faltanIds, repetidasIds);
+
+            if (faltanIds.length === 0 && repetidasIds.length === 0) {
+                alert("Por favor, ingresa datos en tus listas.");
+                return;
+            }
+
+            if (conflictoPropio.length) {
+                const continuar = confirm(`Revisa tu lista: estas estampas aparecen como faltantes y repetidas a la vez: ${construirResumenCodigos(conflictoPropio)}.\n\n¿Quieres generar el enlace de todas formas?`);
+                if (!continuar) return;
+            }
+
+            const dataObj = { n: alias, f: faltanIds, r: repetidasIds };
+            const base64 = codificarDatos(dataObj);
+
+            // Enlace dinámico final. Para escanear con otro celular debe ser http(s), no file:// ni /Users/...
+            const baseUrl = new URL(window.location.href.split('?')[0].split('#')[0], window.location.href).href;
+            const shareLink = `${baseUrl}?p=${base64}`;
+            const urlActual = new URL(baseUrl);
+            const esArchivoLocal = urlActual.protocol === "file:";
+            const esServidorLocal = ["localhost", "127.0.0.1", "::1"].includes(urlActual.hostname);
+            const qrEsCompartible = /^https?:$/.test(urlActual.protocol) && !esServidorLocal;
+
+            // Actualizar la interfaz
+            document.getElementById('inputLink').value = shareLink;
+
+            // Generar QR en el navegador. Si la librería CDN no carga, usa una imagen remota como respaldo.
+            const qrCode = document.getElementById('qrCode');
+            const avisoQrLocal = document.getElementById('avisoQrLocal');
+            qrCode.innerHTML = "";
+            avisoQrLocal.classList.add('hidden');
+            avisoQrLocal.textContent = "";
+
+            if (!qrEsCompartible) {
+                qrCode.textContent = "Abre esta página desde una dirección http(s) accesible por el celular para generar un QR usable.";
+                avisoQrLocal.textContent = esArchivoLocal
+                    ? "El enlace actual apunta a un archivo local de tu Mac. Para escanearlo con el celular, sirve la carpeta en red y abre la página desde una URL como http://IP-DE-TU-MAC:8000/index.html."
+                    : "El enlace actual usa localhost. En un celular, localhost apunta al propio celular. Abre la página usando la IP de tu Mac en la red, por ejemplo http://IP-DE-TU-MAC:8000/index.html.";
+                avisoQrLocal.classList.remove('hidden');
+            } else if (window.QRCode) {
+                new QRCode(qrCode, {
+                    text: shareLink,
+                    width: 220,
+                    height: 220,
+                    colorDark: "#0f172a",
+                    colorLight: "#ffffff",
+                    correctLevel: QRCode.CorrectLevel.L
+                });
+            } else {
+                const fallbackImg = document.createElement('img');
+                fallbackImg.src = `https://quickchart.io/qr?size=220&ecLevel=L&text=${encodeURIComponent(shareLink)}`;
+                fallbackImg.alt = "Código QR de Intercambio";
+                fallbackImg.className = "w-[220px] h-[220px] block mx-auto";
+                qrCode.appendChild(fallbackImg);
+            }
+
+            // Mostrar el contenedor de resultados
+            document.getElementById('resultadoA').classList.remove('hidden');
+        };
+
+        window.iniciarSesionLocal = () => {
+            const nombre = document.getElementById("sessionName")?.value.trim() || "";
+            const email = document.getElementById("sessionEmail")?.value.trim() || "";
+            const recordar = Boolean(document.getElementById("sessionRemember")?.checked);
+            if (!nombre) {
+                alert("Ingresa tu nombre para continuar.");
+                return;
+            }
+
+            sesionUsuario = { nombre, email, keepAlive: recordar, createdAt: new Date().toISOString() };
+            if (recordar) localStorage.setItem(sesionKey, JSON.stringify(sesionUsuario));
+            document.getElementById("nombreA").value = nombre;
+            renderizarSesion();
+        };
+
+        window.cerrarSesionLocal = () => {
+            sesionUsuario = null;
+            localStorage.removeItem(sesionKey);
+            renderizarSesion();
+        };
+
+        window.cambiarAlbum = async (albumId) => {
+            albumActivo = albumId;
+            filtroAlbum = "all";
+            busquedaAlbum = "";
+            estampaSeleccionadaId = null;
+            await cargarEstadoAlbum(albumActivo);
+            renderizarControlAlbum();
+        };
+
+        window.setFiltroAlbum = (filtro) => {
+            filtroAlbum = filtro;
+            renderizarControlAlbum();
+        };
+
+        window.buscarEnAlbum = (valor) => {
+            busquedaAlbum = valor;
+            estampaSeleccionadaId = null;
+            renderizarControlAlbum();
+            const input = document.getElementById("busquedaAlbum");
+            if (input) {
+                input.focus();
+                input.setSelectionRange(input.value.length, input.value.length);
+            }
+        };
+
+        window.limpiarBusquedaAlbum = () => {
+            busquedaAlbum = "";
+            estampaSeleccionadaId = null;
+            renderizarControlAlbum();
+        };
+
+        window.seleccionarEstampa = (id) => {
+            if (!dbCorrelativos[id]) return;
+            estampaSeleccionadaId = estampaSeleccionadaId === id ? null : id;
+            renderizarControlAlbum();
+        };
+
+        window.ajustarCantidadEstampa = (id, delta) => {
+            if (!dbCorrelativos[id]) return;
+            const cantidadActual = estadoEstampas[id] || 0;
+            const siguienteCantidad = Math.max(cantidadActual + Number(delta), 0);
+
+            if (siguienteCantidad === 0) {
+                delete estadoEstampas[id];
+            } else {
+                estadoEstampas[id] = siguienteCantidad;
+            }
+            estampaSeleccionadaId = id;
+            guardarEstadoAlbum();
+            renderizarControlAlbum();
+            if (scannerResultadoId === id) {
+                const status = document.getElementById("scannerStatus");
+                if (status) status.innerHTML = construirHtmlResultadoEscaner(id, scannerTextoOcr);
+            }
+        };
+
+        const obtenerCodigoDesdeOcr = (texto) => {
+            const limpio = texto
+                .toUpperCase()
+                .replace(/[|]/g, "1")
+                .replace(/[—–_]/g, " ")
+                .replace(/[^A-Z0-9\s]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            if (/(^|\s)0\s*0(\s|$)/.test(limpio)) return dbCodigos["00"];
+
+            const normalizado = limpio
+                .replace(/\bF[VW]C\b/g, "FWC")
+                .replace(/\bF\s*W\s*C\b/g, "FWC");
+
+            const codigosOrdenados = Object.keys(dbCodigos).sort((a, b) => b.length - a.length);
+            const compacto = normalizado.replace(/\s+/g, "");
+            const encontradoCompacto = codigosOrdenados.find(codigo => codigo !== "00" && compacto.includes(codigo));
+            if (encontradoCompacto) return dbCodigos[encontradoCompacto];
+
+            const prefijos = ["FWC", ...ordenPaises].join("|");
+            const matchPrefijoNumero = normalizado.match(new RegExp(`\\b(${prefijos})\\s*(\\d{1,2})\\b`));
+            if (matchPrefijoNumero) {
+                return dbCodigos[`${matchPrefijoNumero[1]}${Number(matchPrefijoNumero[2])}`] || null;
+            }
+
+            return null;
+        };
+
+        const construirHtmlResultadoEscaner = (id, textoOcr) => {
+            const item = dbCorrelativos[id];
+            const cantidad = estadoEstampas[id] || 0;
+            const estado = cantidad === 0
+                ? "Te falta"
+                : cantidad === 1
+                    ? "Ya la tienes"
+                    : `Tienes ${cantidad}; ${cantidad - 1} para intercambio`;
+
+            return `
+                <div class="bg-white text-slate-800 rounded-xl p-3 space-y-2">
+                    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Código detectado</p>
+                    <div class="flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-lg font-black text-slate-900">${item.code}</p>
+                            <p class="text-xs text-slate-500">${item.desc}</p>
+                            <p class="text-xs font-bold mt-1 ${cantidad === 0 ? "text-rose-600" : cantidad === 1 ? "text-emerald-700" : "text-orange-700"}">${estado}</p>
+                        </div>
+                        <div class="flex rounded-full overflow-hidden border border-indigo-200 bg-indigo-50">
+                            <button type="button" onclick="ajustarCantidadEstampa(${id}, -1); actualizarResultadoEscaner(${id})" class="w-9 h-8 text-indigo-700 font-black">−</button>
+                            <button type="button" onclick="ajustarCantidadEstampa(${id}, 1); actualizarResultadoEscaner(${id})" class="w-9 h-8 text-indigo-700 font-black border-l border-indigo-200">+</button>
+                        </div>
+                    </div>
+                    <details>
+                        <summary class="text-[10px] text-slate-400 cursor-pointer">Texto leído</summary>
+                        <p class="text-[10px] text-slate-500 mt-1 break-words">${escaparHtml(textoOcr || "")}</p>
+                    </details>
+                </div>
+            `;
+        };
+
+        window.actualizarResultadoEscaner = (id) => {
+            const status = document.getElementById("scannerStatus");
+            if (!status || !dbCorrelativos[id]) return;
+            scannerResultadoId = id;
+            scannerTextoOcr = status.dataset.ocr || scannerTextoOcr;
+            status.innerHTML = construirHtmlResultadoEscaner(id, scannerTextoOcr);
+        };
+
+        window.buscarCodigoManualEscaner = () => {
+            const input = document.getElementById("scannerManualCode");
+            const status = document.getElementById("scannerStatus");
+            if (!input || !status) return;
+
+            const texto = input.value.trim();
+            const idDetectado = obtenerCodigoDesdeOcr(texto);
+            if (!idDetectado) {
+                status.innerHTML = `
+                    <div class="bg-amber-50 text-amber-800 border border-amber-200 rounded-xl p-3 text-[11px] leading-relaxed">
+                        No encontré una correspondencia válida. Prueba con códigos como <b>00</b>, <b>FWC 9</b> o <b>MEX 13</b>.
+                    </div>
+                `;
+                return;
+            }
+
+            estampaSeleccionadaId = idDetectado;
+            scannerResultadoId = idDetectado;
+            scannerTextoOcr = texto;
+            renderizarControlAlbum();
+            const statusActualizado = document.getElementById("scannerStatus");
+            if (statusActualizado) {
+                statusActualizado.dataset.ocr = texto;
+                statusActualizado.innerHTML = construirHtmlResultadoEscaner(idDetectado, texto);
+            }
+        };
+
+        window.abrirEscaner = async () => {
+            const panel = document.getElementById("scannerPanel");
+            const video = document.getElementById("scannerVideo");
+            const status = document.getElementById("scannerStatus");
+            if (!panel || !video || !status) return;
+
+            scannerAbierto = true;
+            panel.classList.remove("hidden");
+            status.textContent = "Abriendo cámara...";
+
+            if (!navigator.mediaDevices?.getUserMedia) {
+                status.textContent = "Este navegador no expone acceso a cámara. Prueba en Chrome/Safari desde https o localhost.";
+                return;
+            }
+
+            try {
+                scannerStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: "environment" } },
+                    audio: false
+                });
+                video.srcObject = scannerStream;
+                status.textContent = "Cámara lista. Buscando código automáticamente...";
+                programarLecturaEscaner(700);
+            } catch (error) {
+                status.textContent = "No se pudo abrir la cámara. Revisa permisos y usa https o localhost.";
+            }
+        };
+
+        window.cerrarEscaner = () => {
+            scannerAbierto = false;
+            scannerResultadoId = null;
+            scannerTextoOcr = "";
+            scannerLeyendo = false;
+            if (scannerLoopTimer) {
+                clearTimeout(scannerLoopTimer);
+                scannerLoopTimer = null;
+            }
+            if (scannerStream) {
+                scannerStream.getTracks().forEach(track => track.stop());
+                scannerStream = null;
+            }
+            const panel = document.getElementById("scannerPanel");
+            const video = document.getElementById("scannerVideo");
+            if (video) video.srcObject = null;
+            if (panel) {
+                panel.classList.remove("hidden");
+                const status = document.getElementById("scannerStatus");
+                if (status) status.textContent = "Cámara apagada. Entra de nuevo a Escáner para activarla.";
+            }
+        };
+
+        const programarLecturaEscaner = (delay = 1100) => {
+            if (!scannerAbierto) return;
+            if (scannerLoopTimer) clearTimeout(scannerLoopTimer);
+            scannerLoopTimer = setTimeout(() => {
+                leerFrameEscaner();
+            }, delay);
+        };
+
+        const leerFrameEscaner = async () => {
+            if (!scannerAbierto || scannerLeyendo) return;
+            const video = document.getElementById("scannerVideo");
+            const canvas = document.getElementById("scannerCanvas");
+            const status = document.getElementById("scannerStatus");
+            if (!video || !canvas || !status) return;
+
+            if (!window.Tesseract) {
+                status.textContent = "No se cargó el motor OCR. Revisa conexión a internet y vuelve a intentar.";
+                return;
+            }
+
+            if (!video.videoWidth || !video.videoHeight) {
+                status.textContent = "Esperando señal de cámara...";
+                programarLecturaEscaner(700);
+                return;
+            }
+
+            const recorteX = Math.floor(video.videoWidth * 0.12);
+            const recorteY = Math.floor(video.videoHeight * 0.18);
+            const recorteW = Math.floor(video.videoWidth * 0.76);
+            const recorteH = Math.floor(video.videoHeight * 0.64);
+            canvas.width = recorteW;
+            canvas.height = recorteH;
+
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            ctx.drawImage(video, recorteX, recorteY, recorteW, recorteH, 0, 0, recorteW, recorteH);
+
+            const imagen = ctx.getImageData(0, 0, recorteW, recorteH);
+            for (let i = 0; i < imagen.data.length; i += 4) {
+                const gris = imagen.data[i] * 0.299 + imagen.data[i + 1] * 0.587 + imagen.data[i + 2] * 0.114;
+                const binario = gris > 142 ? 255 : 0;
+                imagen.data[i] = binario;
+                imagen.data[i + 1] = binario;
+                imagen.data[i + 2] = binario;
+            }
+            ctx.putImageData(imagen, 0, 0);
+
+            scannerLeyendo = true;
+            if (!scannerResultadoId) status.textContent = "Buscando código...";
+
+            try {
+                const resultado = await Tesseract.recognize(canvas, "eng", {
+                    logger: info => {
+                        if (info.status === "recognizing text" && !scannerResultadoId) {
+                            status.textContent = `Leyendo código... ${Math.round((info.progress || 0) * 100)}%`;
+                        }
+                    },
+                    tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 "
+                });
+
+                const textoOcr = resultado?.data?.text || "";
+                const idDetectado = obtenerCodigoDesdeOcr(textoOcr);
+                status.dataset.ocr = textoOcr;
+                scannerTextoOcr = textoOcr;
+
+                if (!idDetectado) {
+                    scannerResultadoId = null;
+                    status.textContent = "Buscando código... acerca la correspondencia Panini al centro.";
+                    scannerLeyendo = false;
+                    programarLecturaEscaner(900);
+                    return;
+                }
+
+                estampaSeleccionadaId = idDetectado;
+                scannerResultadoId = idDetectado;
+                renderizarControlAlbum();
+                status.dataset.ocr = textoOcr;
+                status.innerHTML = construirHtmlResultadoEscaner(idDetectado, textoOcr);
+            } catch (error) {
+                status.textContent = "Ocurrió un error leyendo la imagen. Intenta de nuevo con el código más centrado.";
+            } finally {
+                scannerLeyendo = false;
+                programarLecturaEscaner(scannerResultadoId ? 1600 : 1000);
+            }
+        };
+
+        window.usarListasDelAlbum = () => {
+            const faltan = construirTextoCodigos(obtenerIdsFaltanAlbum());
+            const repetidas = construirTextoCodigos(obtenerIdsPorEstado(2));
+            document.getElementById('faltanA').value = faltan;
+            document.getElementById('repetidasA').value = repetidas;
+            cambiarVista("trade");
+        };
+
+        window.reiniciarAlbum = () => {
+            const confirmar = confirm("Esto limpiará las marcas guardadas de este álbum en este dispositivo. ¿Quieres continuar?");
+            if (!confirmar) return;
+            Object.keys(estadoEstampas).forEach(key => delete estadoEstampas[key]);
+            guardarEstadoAlbum();
+            renderizarControlAlbum();
+        };
+
+        // ========================================================
+        // 5. LÓGICA DE CRUCE (SUJETO B)
+        // ========================================================
+        window.calcularCruce = (nombreA, stringDataA) => {
+            try {
+                const aliasB = document.getElementById('nombreB').value.trim() || "Tú";
+                const dataAOriginal = JSON.parse(stringDataA);
+                const dataA = {
+                    ...dataAOriginal,
+                    f: normalizarListaIds(dataAOriginal.f),
+                    r: normalizarListaIds(dataAOriginal.r)
+                };
+
+                const faltanB = procesarTextoAStickers(document.getElementById('faltanB').value, "faltan");
+                const repetidasB = procesarTextoAStickers(document.getElementById('repetidasB').value, "repetidas");
+
+                const b_da_a = dataA.f.filter(id => repetidasB.includes(id)).sort(compararPorCodigoPanini);
+                const a_da_b = dataA.r.filter(id => faltanB.includes(id)).sort(compararPorCodigoPanini);
+
+                document.getElementById('tit_B_da_A').innerHTML = `🎁 Lo que tú le puedes dar a <span class="text-indigo-600 font-bold">${nombreA}</span>:`;
+                document.getElementById('tit_A_da_B').innerHTML = `🤝 Lo que <span class="text-indigo-600 font-bold">${nombreA}</span> te puede dar a ti:`;
+                document.getElementById('total_B_da_A').textContent = `${b_da_a.length} en total`;
+                document.getElementById('total_A_da_B').textContent = `${a_da_b.length} en total`;
+
+                textoGlobal_B_da_A = construirTextoMensaje(`🎁 Lo que tú le puedes dar a ${nombreA}:`, b_da_a);
+                textoGlobal_A_da_B = construirTextoMensaje(`🤝 Lo que ${nombreA} te puede dar a ti:`, a_da_b);
+
+                document.getElementById('listaB_da_A').innerHTML = construirHtmlLista(b_da_a);
+                document.getElementById('listaA_da_B').innerHTML = construirHtmlLista(a_da_b);
+                document.getElementById('qaCruce').innerHTML = construirHtmlQaCruce({
+                    nombreA,
+                    aliasB,
+                    faltanA: dataA.f,
+                    repetidasA: dataA.r,
+                    faltanB,
+                    repetidasB,
+                    b_da_a,
+                    a_da_b
+                });
+
+                const objetoRespuesta = {
+                    nB: aliasB,
+                    b_da_a: b_da_a,
+                    a_da_b: a_da_b
+                };
+
+                const base64Respuesta = codificarDatos(objetoRespuesta);
+                const linkRespuestaFinal = `${window.location.origin}${window.location.pathname}?p=${base64Respuesta}&m=r`;
+
+                document.getElementById('inputLinkRespuesta').value = linkRespuestaFinal;
+                document.getElementById('resultadoCruce').classList.remove('hidden');
+
+            } catch (error) {
+                alert("Error al calcular el intercambio.");
+                console.error(error);
+            }
+        };

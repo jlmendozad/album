@@ -5,15 +5,25 @@ Webapp estática para controlar álbum, escanear correspondencias Panini y gener
 ## Uso local
 
 ```bash
-python3 -m http.server 8000 --bind 127.0.0.1
+npm install
+npm run dev
 ```
 
 Luego abre:
 
 ```text
-http://127.0.0.1:8000/index.html
+http://localhost:3000
+```
+
+## Variables de entorno
+
+Crea `.env.local` a partir de `.env.example`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ```
 
 ## Despliegue
 
-El proyecto está preparado para Vercel como sitio estático.
+El proyecto está preparado para Vercel como app Next.js.
