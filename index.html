@@ -927,6 +927,10 @@
                             </div>
                             <canvas id="scannerCanvas" class="hidden"></canvas>
                             <div id="scannerStatus" class="text-[11px] text-slate-300 leading-relaxed">Entrando al escáner...</div>
+                            <div class="flex gap-2">
+                                <input id="scannerManualCode" class="w-full bg-white/10 border border-white/20 rounded-xl p-2.5 text-xs text-white placeholder:text-slate-400 focus:outline-none focus:border-indigo-300" placeholder="Si no lee: MEX 13, FWC 9, 00">
+                                <button type="button" onclick="buscarCodigoManualEscaner()" class="bg-white text-slate-900 font-bold px-3 rounded-xl text-xs">Buscar</button>
+                            </div>
                         </div>
                     </div>
 
@@ -1332,6 +1336,33 @@
             scannerResultadoId = id;
             scannerTextoOcr = status.dataset.ocr || scannerTextoOcr;
             status.innerHTML = construirHtmlResultadoEscaner(id, scannerTextoOcr);
+        };
+
+        window.buscarCodigoManualEscaner = () => {
+            const input = document.getElementById("scannerManualCode");
+            const status = document.getElementById("scannerStatus");
+            if (!input || !status) return;
+
+            const texto = input.value.trim();
+            const idDetectado = obtenerCodigoDesdeOcr(texto);
+            if (!idDetectado) {
+                status.innerHTML = `
+                    <div class="bg-amber-50 text-amber-800 border border-amber-200 rounded-xl p-3 text-[11px] leading-relaxed">
+                        No encontré una correspondencia válida. Prueba con códigos como <b>00</b>, <b>FWC 9</b> o <b>MEX 13</b>.
+                    </div>
+                `;
+                return;
+            }
+
+            estampaSeleccionadaId = idDetectado;
+            scannerResultadoId = idDetectado;
+            scannerTextoOcr = texto;
+            renderizarControlAlbum();
+            const statusActualizado = document.getElementById("scannerStatus");
+            if (statusActualizado) {
+                statusActualizado.dataset.ocr = texto;
+                statusActualizado.innerHTML = construirHtmlResultadoEscaner(idDetectado, texto);
+            }
         };
 
         window.abrirEscaner = async () => {
