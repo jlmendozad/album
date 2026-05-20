@@ -432,11 +432,28 @@
             return secciones;
         };
 
-        const cargarSesion = () => {
-            try {
-                sesionUsuario = JSON.parse(localStorage.getItem(sesionKey) || "null");
-            } catch (error) {
-                sesionUsuario = null;
+        const cargarSesion = async () => {
+            if (!window.supabaseClient) {
+                sesionUsuario = window.sesionUsuario || null;
+                return;
+            }
+
+            const { data } = await window.supabaseClient.auth.getSession();
+
+            if (data.session?.user) {
+                sesionUsuario = {
+                    id: data.session.user.id,
+                    email: data.session.user.email,
+                    nombre:
+                        data.session.user.user_metadata?.nombre ||
+                        data.session.user.user_metadata?.full_name ||
+                        data.session.user.email,
+                    invitado: false
+                };
+
+                window.sesionUsuario = sesionUsuario;
+            } else {
+                sesionUsuario = window.sesionUsuario || null;
             }
         };
 
@@ -444,37 +461,37 @@
             const panel = document.getElementById("sessionPanel");
             if (!panel) return;
 
-            if (sesionUsuario?.nombre) {
+            const usuario = window.sesionUsuario || sesionUsuario;
+
+            if (usuario && !usuario.invitado) {
                 panel.innerHTML = `
-                    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-3">
                         <div>
-                            <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Sesión local</p>
-                            <p class="text-sm font-bold text-slate-800">${escaparHtml(sesionUsuario.nombre)}</p>
-                            <p class="text-[10px] text-slate-500">Preparado para sincronizar con backend cuando esté disponible.</p>
+                            <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Cuenta activa</p>
+                            <p class="text-sm font-bold text-slate-800">${escaparHtml(usuario.nombre || "Usuario")}</p>
+                            <p class="text-xs text-slate-500">${escaparHtml(usuario.email || "Sin correo registrado")}</p>
                         </div>
-                        <button type="button" onclick="cerrarSesionLocal()" class="bg-white border border-indigo-200 text-indigo-700 font-bold px-3 py-2 rounded-lg text-xs">Salir</button>
+
+                        <button type="button" onclick="cerrarSesionSupabase()" class="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">
+                            Cerrar sesión
+                        </button>
                     </div>
                 `;
-                const nombreInput = document.getElementById("nombreA");
-                if (nombreInput && !nombreInput.value.trim()) nombreInput.value = sesionUsuario.nombre;
                 return;
             }
 
             panel.innerHTML = `
-                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
                     <div>
                         <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Cuenta</p>
-                        <p class="text-xs text-slate-500">Reserva para login. Por ahora guarda tu sesión en este dispositivo.</p>
+                        <p class="text-xs text-slate-500">
+                            No tienes sesión iniciada. Puedes iniciar sesión para guardar tu progreso.
+                        </p>
                     </div>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <input id="sessionName" class="bg-white border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="Tu nombre">
-                        <input id="sessionEmail" class="bg-white border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="Email opcional">
-                    </div>
-                    <label class="flex items-center gap-2 text-xs text-slate-600">
-                        <input id="sessionRemember" type="checkbox" checked class="rounded border-slate-300">
-                        Mantener sesión abierta en este dispositivo
-                    </label>
-                    <button type="button" onclick="iniciarSesionLocal()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">Continuar</button>
+
+                    <button type="button" onclick="window.abrirPopupLogin?.()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">
+                        Iniciar sesión
+                    </button>
                 </div>
             `;
         };
@@ -806,8 +823,7 @@
                     </div>
                 </div>
             `;
-            cargarSesion();
-            renderizarSesion();
+            cargarSesion().then(renderizarSesion);
             cargarEstadoAlbum(albumActivo).then(renderizarControlAlbum);
             renderizarNavegacionPrincipal();
             mostrarVista(vistaActiva);
@@ -1039,6 +1055,27 @@
             estampaSeleccionadaId = null;
             await cargarEstadoAlbum(albumActivo);
             renderizarControlAlbum();
+        };
+
+        window.addEventListener("auth-ready", (event) => {
+            sesionUsuario = event.detail;
+            window.sesionUsuario = event.detail;
+
+            const nombreInput = document.getElementById("nombreA");
+            if (nombreInput && !nombreInput.value.trim()) {
+                nombreInput.value = sesionUsuario.nombre || "";
+            }
+
+            renderizarSesion();
+        });
+
+        window.cerrarSesionSupabase = async () => {
+            await window.supabaseClient.auth.signOut();
+
+            sesionUsuario = null;
+            window.sesionUsuario = null;
+
+            renderizarSesion();
         };
 
         window.setFiltroAlbum = (filtro) => {

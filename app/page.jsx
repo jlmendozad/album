@@ -1,8 +1,13 @@
 import Script from "next/script";
+import AuthPopupWrapper from "./components/AuthPopupWrapper";
+import SupabaseBootstrap from "./components/SupabaseBootstrap";
 
 export default function HomePage() {
   return (
     <>
+      <SupabaseBootstrap />
+      <AuthPopupWrapper />
+
       <Script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" strategy="afterInteractive" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" strategy="afterInteractive" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js" strategy="afterInteractive" />
