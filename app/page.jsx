@@ -12,7 +12,7 @@ export default function HomePage() {
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" strategy="afterInteractive" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js" strategy="afterInteractive" />
 
-      <div className="max-w-md mx-auto px-4 py-6 md:max-w-2xl min-h-screen flex flex-col justify-between">
+      <div className="max-w-md mx-auto px-4 py-6 md:max-w-2xl">
         <div>
           <header className="text-center mb-6 bg-gradient-to-r from-indigo-700 via-blue-600 to-indigo-800 p-5 rounded-2xl shadow-md text-white">
             <h1 className="text-3xl font-tournament tracking-tight leading-none drop-shadow-sm">

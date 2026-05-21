@@ -7,6 +7,7 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState("inicio");
   const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState(null);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -42,9 +43,15 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
   useEffect(() => {
     if (forceOpen) {
       setMode("inicio");
+      setNotice(null);
       setVisible(true);
     }
   }, [forceOpen]);
+
+  const cambiarModo = (nextMode) => {
+    setNotice(null);
+    setMode(nextMode);
+  };
 
   const continuarComoInvitado = () => {
     onAuthReady?.({
@@ -60,7 +67,11 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
 
   const iniciarSesion = async () => {
     if (!loginEmail || !loginPassword) {
-      alert("Ingresa correo y contraseña.");
+      setNotice({
+        type: "error",
+        title: "Faltan datos",
+        text: "Ingresa correo y contraseña para continuar.",
+      });
       return;
     }
 
@@ -74,7 +85,11 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
     setLoading(false);
 
     if (error) {
-      alert("No se pudo iniciar sesión: " + error.message);
+      setNotice({
+        type: "error",
+        title: "No se pudo iniciar sesión",
+        text: error.message,
+      });
       return;
     }
 
@@ -91,7 +106,11 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
 
   const registrarse = async () => {
     if (!nombre || !registroEmail || !registroPassword) {
-      alert("Completa nombre, correo y contraseña.");
+      setNotice({
+        type: "error",
+        title: "Registro incompleto",
+        text: "Completa nombre, correo y contraseña.",
+      });
       return;
     }
 
@@ -110,11 +129,19 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
     setLoading(false);
 
     if (error) {
-      alert("No se pudo registrar: " + error.message);
+      setNotice({
+        type: "error",
+        title: "No se pudo crear la cuenta",
+        text: error.message,
+      });
       return;
     }
 
-    alert("Cuenta creada.");
+    setNotice({
+      type: "success",
+      title: "Cuenta creada",
+      text: "Tu cuenta fue creada correctamente. Inicia sesión para guardar tu progreso.",
+    });
     setMode("login");
   };
 
@@ -141,10 +168,25 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
           </p>
         </div>
 
+        {notice && (
+          <div
+            className={`rounded-xl border p-3 text-left ${
+              notice.type === "success"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                : "bg-rose-50 border-rose-200 text-rose-900"
+            }`}
+          >
+            <p className="text-[10px] font-bold uppercase tracking-wider">
+              {notice.title}
+            </p>
+            <p className="text-xs mt-1 leading-relaxed">{notice.text}</p>
+          </div>
+        )}
+
         {mode === "inicio" && (
           <div className="space-y-3">
             <button
-              onClick={() => setMode("login")}
+              onClick={() => cambiarModo("login")}
               className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm"
             >
               Iniciar sesión
@@ -197,14 +239,14 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
             </button>
 
             <button
-              onClick={() => setMode("registro")}
+              onClick={() => cambiarModo("registro")}
               className="w-full text-indigo-700 font-bold text-xs"
             >
               Crear una cuenta
             </button>
 
             <button
-              onClick={() => setMode("inicio")}
+              onClick={() => cambiarModo("inicio")}
               className="w-full text-slate-400 text-xs"
             >
               Volver
@@ -254,7 +296,7 @@ export default function AuthPopup({ onAuthReady, forceOpen = false, onClose }) {
             </button>
 
             <button
-              onClick={() => setMode("login")}
+              onClick={() => cambiarModo("login")}
               className="w-full text-indigo-700 font-bold text-xs"
             >
               Ya tengo cuenta

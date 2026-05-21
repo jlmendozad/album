@@ -165,6 +165,21 @@
             return null;
         };
 
+        const detectarSeccionEstadoAlbum = (linea) => {
+            const limpio = linea
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^A-Za-z\s]/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .toLowerCase();
+
+            if (/^(i\s+need|need|needs|missing|faltan|falta|busco|necesito)\b/.test(limpio)) return "faltan";
+            if (/^(swaps?|swap|dupes?|duplicates?|repeated|repetidas?|repetidos?)\b/.test(limpio)) return "repetidas";
+            if (/^(i\s+have|have|haves|owned|collected|tengo|tenidas?|mis\s+estampas|ya\s+tengo)\b/.test(limpio)) return "tengo";
+            return null;
+        };
+
         const extraerIdsDeLineaConPrefijo = (linea) => {
             const matchCeroCero = linea.match(/^\s*00\s*$/);
             if (matchCeroCero) {
@@ -255,6 +270,45 @@
             }
 
             return [...idsEncontrados].sort(compararPorCodigoPanini);
+        };
+
+        const procesarTextoEstadoAlbum = (texto) => {
+            const resultado = { tengo: [], faltan: [], repetidas: [] };
+            if (!texto) return resultado;
+
+            const lineas = texto.replace(/\r/g, "\n").split("\n");
+            const bloques = { tengo: [], faltan: [], repetidas: [] };
+            const sinSeccion = [];
+            let seccionActual = null;
+            let encontroSecciones = false;
+
+            lineas.forEach(lineaOriginal => {
+                const linea = lineaOriginal.trim();
+                if (!linea) return;
+
+                const nuevaSeccion = detectarSeccionEstadoAlbum(linea);
+                if (nuevaSeccion) {
+                    seccionActual = nuevaSeccion;
+                    encontroSecciones = true;
+                    return;
+                }
+
+                if (seccionActual) {
+                    bloques[seccionActual].push(linea);
+                } else {
+                    sinSeccion.push(linea);
+                }
+            });
+
+            if (!encontroSecciones) {
+                resultado.tengo = procesarTextoAStickers(sinSeccion.join("\n"));
+                return resultado;
+            }
+
+            resultado.tengo = procesarTextoAStickers(bloques.tengo.join("\n"));
+            resultado.faltan = procesarTextoAStickers(bloques.faltan.join("\n"), "faltan");
+            resultado.repetidas = procesarTextoAStickers(bloques.repetidas.join("\n"), "repetidas");
+            return resultado;
         };
 
         let textoGlobal_B_da_A = "";
@@ -371,7 +425,82 @@
             `;
         };
 
-        const appUrlPublica = "https://panini-iota.vercel.app";
+        const appUrlPublica = "https://www.albumcompleto.app";
+        const tablaIntercambios = "trade_shares";
+
+        const generarCodigoCompartido = () => {
+            const bytes = new Uint8Array(6);
+            crypto.getRandomValues(bytes);
+            return bytesABase64Url(bytes).toLowerCase();
+        };
+
+        const obtenerUrlBaseCompartible = () => {
+            const baseUrl = new URL(window.location.href.split('?')[0].split('#')[0], window.location.href);
+            return baseUrl.href;
+        };
+
+        const crearLinkCorto = (codigo, modo = "") => {
+            const url = new URL(obtenerUrlBaseCompartible());
+            url.searchParams.set("s", codigo);
+            if (modo) url.searchParams.set("m", modo);
+            return url.href;
+        };
+
+        const guardarIntercambioCorto = async (payload) => {
+            if (!window.supabaseClient) return null;
+
+            try {
+                const { data: sessionData } = await window.supabaseClient.auth.getSession();
+                const codigo = generarCodigoCompartido();
+                const { error } = await window.supabaseClient
+                    .from(tablaIntercambios)
+                    .insert({
+                        code: codigo,
+                        request_payload: payload,
+                        created_by: sessionData.session?.user?.id || null,
+                        updated_at: new Date().toISOString()
+                    });
+
+                if (error) throw error;
+                return codigo;
+            } catch (error) {
+                console.warn("No se pudo crear link corto; usando link largo.", error);
+                return null;
+            }
+        };
+
+        const obtenerIntercambioCorto = async (codigo) => {
+            if (!window.supabaseClient) throw new Error("Supabase no está disponible.");
+            const { data, error } = await window.supabaseClient
+                .from(tablaIntercambios)
+                .select("code, request_payload, response_payload")
+                .eq("code", codigo)
+                .maybeSingle();
+
+            if (error) throw error;
+            if (!data) throw new Error("No se encontró este intercambio.");
+            return data;
+        };
+
+        const guardarRespuestaIntercambio = async (codigo, payload) => {
+            if (!codigo || !window.supabaseClient) return false;
+
+            try {
+                const { error } = await window.supabaseClient
+                    .from(tablaIntercambios)
+                    .update({
+                        response_payload: payload,
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq("code", codigo);
+
+                if (error) throw error;
+                return true;
+            } catch (error) {
+                console.warn("No se pudo guardar respuesta corta; usando link largo.", error);
+                return false;
+            }
+        };
 
         const construirTextoMensaje = (titulo, listaIds) => {
             let txt = `He utilizado Copa Mundial 2026 Matcher para validar nuestro intercambio de estampas y esto ha devuelto:\n\n`;
@@ -407,6 +536,9 @@
         let sesionUsuario = null;
         let vistaActiva = "album";
         let preservarScrollAlbum = true;
+        let mostrarImportadorAlbum = false;
+        let mostrarListadoAlbum = false;
+        let mostrarResumenAlbum = false;
 
         const sesionKey = "panini-session";
         const apiCliente = {
@@ -539,6 +671,10 @@
                 .sort(compararPorCodigoPanini);
         };
 
+        const obtenerTodosLosIdsAlbum = () => {
+            return Object.keys(dbCorrelativos).map(Number).sort(compararPorCodigoPanini);
+        };
+
         const construirTextoCodigos = (ids) => {
             return [...ids].sort(compararPorCodigoPanini).map(id => dbCorrelativos[id].code).join(", ");
         };
@@ -590,9 +726,11 @@
                 return item.code.replace(/\s+/g, "").includes(query.replace(/\s+/g, "")) || item.code.includes(query) || item.desc.toUpperCase().includes(query);
             };
 
+            let totalStickersVisibles = 0;
             const htmlSecciones = secciones.map(seccion => {
                 const idsVisibles = seccion.ids.filter(id => coincideFiltro(id) && coincideBusqueda(id));
                 if (!idsVisibles.length) return "";
+                totalStickersVisibles += idsVisibles.length;
 
                 const botones = idsVisibles.map(id => {
                     const cantidad = estadoEstampas[id] || 0;
@@ -662,33 +800,125 @@
                         Toca una estampa y usa − / + para ajustar cuántas tienes. Con 2 o más, entra a intercambio.
                     </p>
 
-                    <div class="flex gap-2">
-                        <input id="busquedaAlbum" value="${escaparHtml(busquedaAlbum)}" oninput="buscarEnAlbum(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="Buscar: FWC 9, MEX 13...">
-                        <button type="button" onclick="limpiarBusquedaAlbum()" class="bg-slate-100 border border-slate-300 text-slate-600 font-bold px-3 rounded-xl text-xs">Limpiar</button>
+                    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Importar estado actual</p>
+                                <p class="text-xs text-slate-600">Pega una lista de otra app o listas separadas de tengo, faltan y repetidas.</p>
+                            </div>
+                            <button type="button" onclick="toggleImportadorAlbum()" class="bg-white border border-indigo-200 text-indigo-700 font-bold px-3 py-2 rounded-lg text-xs shrink-0">
+                                ${mostrarImportadorAlbum ? "Ocultar" : "Importar"}
+                            </button>
+                        </div>
+
+                        ${mostrarImportadorAlbum ? `
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Lista completa</label>
+                                    <textarea id="albumImportFull" rows="4" class="w-full bg-white border border-indigo-200 rounded-xl p-2.5 text-xs font-mono focus:outline-none focus:border-indigo-500" placeholder="Ej: I need&#10;MEX: 4, 5&#10;Swaps&#10;CAN: 14&#10;O secciones: Tengo / Faltan / Repetidas"></textarea>
+                                </div>
+
+                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <div>
+                                        <label class="block text-[10px] font-bold uppercase tracking-wider text-emerald-700 mb-1">Tengo</label>
+                                        <textarea id="albumImportOwned" rows="3" class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="MEX 1, MEX 2..."></textarea>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold uppercase tracking-wider text-rose-700 mb-1">Faltan</label>
+                                        <textarea id="albumImportNeed" rows="3" class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="I need..."></textarea>
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold uppercase tracking-wider text-orange-700 mb-1">Repetidas</label>
+                                        <textarea id="albumImportSwaps" rows="3" class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-mono" placeholder="Swaps..."></textarea>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button type="button" onclick="importarEstadoAlbum('replace')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">
+                                        Reemplazar álbum
+                                    </button>
+                                    <button type="button" onclick="importarEstadoAlbum('merge')" class="bg-white border border-slate-300 text-slate-700 font-bold py-2.5 px-3 rounded-xl text-xs">
+                                        Sumar a mis marcas
+                                    </button>
+                                </div>
+                                <p class="text-[10px] text-slate-500 leading-relaxed">Si solo pegas “faltan” y reemplazas, el resto del álbum se marca como ya tengo. Las repetidas siempre cuentan como tengo + una copia extra.</p>
+                            </div>
+                        ` : ""}
                     </div>
 
-                    <div class="flex gap-2">
-                        <button type="button" onclick="usarListasDelAlbum()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-tournament py-2.5 px-3 rounded-xl text-xs transition shadow shadow-indigo-100">Usar estas listas</button>
-                        <button type="button" onclick="cambiarVista('scanner')" class="bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">Escanear</button>
-                        <button type="button" onclick="reiniciarAlbum()" class="bg-white border border-slate-300 text-slate-600 font-bold py-2.5 px-3 rounded-xl text-xs">Reiniciar</button>
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-3">
+                        <div>
+                            <p class="text-[10px] font-bold uppercase tracking-wider text-slate-600">Busca tus estampas</p>
+                            <p class="text-xs text-slate-500">Encuentra una estampa por código o usa la cámara para marcarla.</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <input id="busquedaAlbum" value="${escaparHtml(busquedaAlbum)}" oninput="buscarEnAlbum(this.value)" class="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-sm focus:outline-none focus:border-indigo-600" placeholder="FWC 9, MEX 13...">
+                            <button type="button" onclick="limpiarBusquedaAlbum()" class="bg-white border border-slate-300 text-slate-600 font-bold px-3 rounded-xl text-xs">Limpiar</button>
+                        </div>
+                        <button type="button" onclick="cambiarVista('scanner')" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 px-3 rounded-xl text-xs">Escanear con cámara</button>
                     </div>
 
-                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 space-y-3">
                         <div>
-                            <p class="text-[10px] font-bold uppercase text-emerald-700">Ya tengo</p>
-                            <p class="text-[10px] text-slate-500 leading-relaxed">${construirTextoCodigos(idsTengo) || "Sin estampas marcadas."}</p>
+                            <p class="text-[10px] font-bold uppercase tracking-wider text-indigo-700">Intercambio</p>
+                            <p class="text-xs text-slate-600">Genera un link con tus faltantes y repetidas para comparar con otra persona.</p>
                         </div>
-                        <div>
-                            <p class="text-[10px] font-bold uppercase text-orange-700">Para intercambiar</p>
-                            <p class="text-[10px] text-slate-500 leading-relaxed">${construirTextoIntercambio(idsSwaps) || "Sin repetidas marcadas."}</p>
-                        </div>
-                        <div>
-                            <p class="text-[10px] font-bold uppercase text-rose-700">Me faltan</p>
-                            <p class="text-[10px] text-slate-500 leading-relaxed max-h-16 overflow-y-auto">${construirTextoCodigos(idsNeed) || "Álbum completo."}</p>
-                        </div>
+                        <button type="button" onclick="usarListasDelAlbum()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-tournament py-2.5 px-3 rounded-xl text-xs transition shadow shadow-indigo-100">Crear link de intercambio</button>
                     </div>
 
-                    <div id="albumStickerList" class="space-y-5 max-h-[560px] overflow-y-auto pr-1">${htmlSecciones || `<p class="text-center text-xs text-slate-400 py-6">No hay estampas con ese filtro.</p>`}</div>
+                    <div class="border border-slate-200 rounded-xl overflow-hidden">
+                        <button type="button" onclick="toggleResumenAlbum()" class="w-full bg-slate-50 hover:bg-slate-100 px-3 py-3 flex items-center justify-between gap-3 text-left">
+                            <span>
+                                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Resumen para listas</span>
+                                <span class="block text-xs text-slate-600">Tengo ${idsTengo.length} · Cambio ${idsSwaps.length} · Faltan ${idsNeed.length}</span>
+                            </span>
+                            <span class="text-xs font-bold text-indigo-700">${mostrarResumenAlbum ? "Ocultar" : "Ver listas"}</span>
+                        </button>
+
+                        ${mostrarResumenAlbum ? `
+                            <div class="bg-white p-3 space-y-3 border-t border-slate-200">
+                                <div>
+                                    <div class="flex items-center justify-between gap-2 mb-1">
+                                        <p class="text-[10px] font-bold uppercase text-emerald-700">Ya tengo</p>
+                                        <button type="button" onclick="copiarListaAlbum('owned', this.id)" id="copyOwnedList" class="text-[10px] font-bold text-slate-500">Copiar</button>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 leading-relaxed max-h-28 overflow-y-auto">${construirTextoCodigos(idsTengo) || "Sin estampas marcadas."}</p>
+                                </div>
+                                <div>
+                                    <div class="flex items-center justify-between gap-2 mb-1">
+                                        <p class="text-[10px] font-bold uppercase text-orange-700">Para intercambiar</p>
+                                        <button type="button" onclick="copiarListaAlbum('swaps', this.id)" id="copySwapList" class="text-[10px] font-bold text-slate-500">Copiar</button>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 leading-relaxed max-h-28 overflow-y-auto">${construirTextoIntercambio(idsSwaps) || "Sin repetidas marcadas."}</p>
+                                </div>
+                                <div>
+                                    <div class="flex items-center justify-between gap-2 mb-1">
+                                        <p class="text-[10px] font-bold uppercase text-rose-700">Me faltan</p>
+                                        <button type="button" onclick="copiarListaAlbum('need', this.id)" id="copyNeedList" class="text-[10px] font-bold text-slate-500">Copiar</button>
+                                    </div>
+                                    <p class="text-[10px] text-slate-500 leading-relaxed max-h-28 overflow-y-auto">${construirTextoCodigos(idsNeed) || "Álbum completo."}</p>
+                                </div>
+                            </div>
+                        ` : ""}
+                    </div>
+
+                    <div class="border border-slate-200 rounded-xl overflow-hidden">
+                        <button type="button" onclick="toggleListadoAlbum()" class="w-full bg-slate-50 hover:bg-slate-100 px-3 py-3 flex items-center justify-between gap-3 text-left">
+                            <span>
+                                <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">Listado de estampas</span>
+                                <span class="block text-xs text-slate-600">${mostrarListadoAlbum ? `${totalStickersVisibles} visibles` : "Oculto para dejar más espacio"}</span>
+                            </span>
+                            <span class="text-xs font-bold text-indigo-700">${mostrarListadoAlbum ? "Ocultar" : "Ver listado"}</span>
+                        </button>
+
+                        ${mostrarListadoAlbum ? `
+                            <div id="albumStickerList" class="space-y-5 max-h-[560px] overflow-y-auto p-3">${htmlSecciones || `<p class="text-center text-xs text-slate-400 py-6">No hay estampas con ese filtro.</p>`}</div>
+                        ` : ""}
+                    </div>
+
+                    <button type="button" onclick="reiniciarAlbum()" class="w-full text-center text-[10px] font-bold uppercase tracking-wider text-rose-600 py-2">
+                        Borrar marcas del álbum
+                    </button>
                 </div>
             `;
             const listadoActual = document.getElementById("albumStickerList");
@@ -702,6 +932,8 @@
         const urlParams = new URLSearchParams(window.location.search);
         const dataParam = urlParams.get('p');
         const modeParam = urlParams.get('m');
+        const shareParam = urlParams.get('s');
+        const shareIdParam = urlParams.get('sid') || shareParam;
         const container = document.getElementById('app-container');
 
         function renderizarNavegacionPrincipal() {
@@ -710,7 +942,6 @@
 
             const vistas = [
                 ["album", "Álbum"],
-                ["scanner", "Escáner"],
                 ["trade", "Intercambio"],
                 ["account", "Cuenta"]
             ];
@@ -739,7 +970,45 @@
             }
         };
 
-        if (!dataParam) {
+        if (shareParam) {
+            container.innerHTML = `
+                <div class="text-center py-8 space-y-2">
+                    <p class="text-sm font-bold text-indigo-700">Cargando intercambio...</p>
+                    <p class="text-xs text-slate-500">Estamos abriendo el link corto de albumcompleto.app.</p>
+                </div>
+            `;
+
+            obtenerIntercambioCorto(shareParam)
+                .then(registro => {
+                    const esRespuesta = modeParam === "r";
+                    const payload = esRespuesta ? registro.response_payload : registro.request_payload;
+
+                    if (!payload) {
+                        container.innerHTML = `
+                            <div class="text-center py-8 space-y-3">
+                                <p class="text-sm font-bold text-slate-800">Resultado pendiente</p>
+                                <p class="text-xs text-slate-500 leading-relaxed">B todavía no ha enviado la comparación. Cuando la complete, este mismo link mostrará el resultado.</p>
+                                <button type="button" onclick="window.location.reload()" class="bg-indigo-600 text-white font-bold px-4 py-2 rounded-xl text-xs">Revisar de nuevo</button>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    const destino = new URL(obtenerUrlBaseCompartible());
+                    destino.searchParams.set("p", codificarDatos(payload));
+                    destino.searchParams.set("sid", shareParam);
+                    if (esRespuesta) destino.searchParams.set("m", "r");
+                    window.location.replace(destino.href);
+                })
+                .catch(error => {
+                    container.innerHTML = `
+                        <div class="text-center py-8 space-y-2">
+                            <p class="text-sm font-bold text-rose-700">No se pudo abrir el link</p>
+                            <p class="text-xs text-slate-500 leading-relaxed">${escaparHtml(error.message || "Intenta de nuevo más tarde.")}</p>
+                        </div>
+                    `;
+                });
+        } else if (!dataParam) {
             // PANTALLA 1: CREADOR PRINCIPAL (SUJETO A)
             container.innerHTML = `
                 <div class="space-y-4">
@@ -748,7 +1017,7 @@
                         <p class="text-xs text-slate-500">Controla tu álbum, escanea estampas y genera intercambios desde vistas separadas.</p>
                     </div>
 
-                    <nav id="mainNav" class="grid grid-cols-4 gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1"></nav>
+                    <nav id="mainNav" class="grid grid-cols-3 gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1"></nav>
 
                     <div id="view-album" class="app-view space-y-4">
                         <div id="albumControl" class="bg-white rounded-xl"></div>
@@ -959,7 +1228,7 @@
         // ========================================================
         // 4. LÓGICA DE PROCESAMIENTO (SUJETO A)
         // ========================================================
-        window.generarPase = () => {
+        window.generarPase = async () => {
             const alias = document.getElementById('nombreA').value.trim() || "Coleccionista A";
             const faltanInput = document.getElementById('faltanA');
             const repetidasInput = document.getElementById('repetidasA');
@@ -989,12 +1258,14 @@
             const base64 = codificarDatos(dataObj);
 
             // Enlace dinámico final. Para escanear con otro celular debe ser http(s), no file:// ni /Users/...
-            const baseUrl = new URL(window.location.href.split('?')[0].split('#')[0], window.location.href).href;
-            const shareLink = `${baseUrl}?p=${base64}`;
+            const baseUrl = obtenerUrlBaseCompartible();
+            const fallbackLink = `${baseUrl}?p=${base64}`;
             const urlActual = new URL(baseUrl);
             const esArchivoLocal = urlActual.protocol === "file:";
             const esServidorLocal = ["localhost", "127.0.0.1", "::1"].includes(urlActual.hostname);
             const qrEsCompartible = /^https?:$/.test(urlActual.protocol) && !esServidorLocal;
+            const codigoCorto = qrEsCompartible ? await guardarIntercambioCorto(dataObj) : null;
+            const shareLink = codigoCorto ? crearLinkCorto(codigoCorto) : fallbackLink;
 
             // Actualizar la interfaz
             document.getElementById('inputLink').value = shareLink;
@@ -1059,6 +1330,8 @@
             filtroAlbum = "all";
             busquedaAlbum = "";
             estampaSeleccionadaId = null;
+            mostrarListadoAlbum = false;
+            mostrarResumenAlbum = false;
             preservarScrollAlbum = false;
             await cargarEstadoAlbum(albumActivo);
             renderizarControlAlbum();
@@ -1095,6 +1368,7 @@
         window.buscarEnAlbum = (valor) => {
             busquedaAlbum = valor;
             estampaSeleccionadaId = null;
+            if (valor.trim()) mostrarListadoAlbum = true;
             preservarScrollAlbum = false;
             renderizarControlAlbum();
             const input = document.getElementById("busquedaAlbum");
@@ -1109,6 +1383,112 @@
             estampaSeleccionadaId = null;
             preservarScrollAlbum = false;
             renderizarControlAlbum();
+        };
+
+        window.toggleResumenAlbum = () => {
+            mostrarResumenAlbum = !mostrarResumenAlbum;
+            preservarScrollAlbum = false;
+            renderizarControlAlbum();
+        };
+
+        window.copiarListaAlbum = (tipo, idBoton) => {
+            const texto = tipo === "swaps"
+                ? construirTextoIntercambio(obtenerIdsPorEstado(2))
+                : tipo === "need"
+                    ? construirTextoCodigos(obtenerIdsFaltanAlbum())
+                    : construirTextoCodigos(obtenerIdsTengo());
+            copiarTextoDirecto(texto, idBoton);
+        };
+
+        window.toggleListadoAlbum = () => {
+            mostrarListadoAlbum = !mostrarListadoAlbum;
+            estampaSeleccionadaId = null;
+            preservarScrollAlbum = false;
+            renderizarControlAlbum();
+        };
+
+        window.toggleImportadorAlbum = () => {
+            mostrarImportadorAlbum = !mostrarImportadorAlbum;
+            preservarScrollAlbum = false;
+            renderizarControlAlbum();
+        };
+
+        const leerImportadorAlbum = () => {
+            const desdeListaCompleta = procesarTextoEstadoAlbum(document.getElementById("albumImportFull")?.value || "");
+            const tengoManual = procesarTextoAStickers(document.getElementById("albumImportOwned")?.value || "");
+            const faltanManual = procesarTextoAStickers(document.getElementById("albumImportNeed")?.value || "", "faltan");
+            const repetidasManual = procesarTextoAStickers(document.getElementById("albumImportSwaps")?.value || "", "repetidas");
+
+            return {
+                tengo: normalizarListaIds([...desdeListaCompleta.tengo, ...tengoManual]),
+                faltan: normalizarListaIds([...desdeListaCompleta.faltan, ...faltanManual]),
+                repetidas: normalizarListaIds([...desdeListaCompleta.repetidas, ...repetidasManual])
+            };
+        };
+
+        window.importarEstadoAlbum = (modo) => {
+            const listas = leerImportadorAlbum();
+            const tieneDatos = listas.tengo.length || listas.faltan.length || listas.repetidas.length;
+
+            if (!tieneDatos) {
+                alert("Pega al menos una lista para importar tu estado del álbum.");
+                return;
+            }
+
+            const conflictoFaltanTengo = intersectarListas(listas.faltan, listas.tengo);
+            const conflictoFaltanRepetidas = intersectarListas(listas.faltan, listas.repetidas);
+            const conflictos = normalizarListaIds([...conflictoFaltanTengo, ...conflictoFaltanRepetidas]);
+
+            if (conflictos.length) {
+                const continuar = confirm(`Estas estampas aparecen como faltantes y también como tengo/repetidas: ${construirResumenCodigos(conflictos)}.\n\nSi continúas, se marcarán como tengo porque la lista de repetidas/tengo tiene prioridad.`);
+                if (!continuar) return;
+            }
+
+            const nuevosEstados = modo === "replace" ? {} : { ...estadoEstampas };
+            const tengoSet = new Set(listas.tengo);
+            const faltanSet = new Set(listas.faltan);
+            const repetidasSet = new Set(listas.repetidas);
+            const inferirTengoPorFaltantes = modo === "replace" && listas.faltan.length && !listas.tengo.length;
+
+            if (inferirTengoPorFaltantes) {
+                obtenerTodosLosIdsAlbum().forEach(id => {
+                    if (!faltanSet.has(id)) nuevosEstados[id] = 1;
+                });
+            }
+
+            listas.tengo.forEach(id => {
+                nuevosEstados[id] = Math.max(nuevosEstados[id] || 0, 1);
+            });
+
+            listas.repetidas.forEach(id => {
+                nuevosEstados[id] = Math.max(nuevosEstados[id] || 0, 2);
+            });
+
+            if (modo === "replace") {
+                listas.faltan.forEach(id => {
+                    if (!tengoSet.has(id) && !repetidasSet.has(id)) delete nuevosEstados[id];
+                });
+            }
+
+            Object.keys(estadoEstampas).forEach(key => delete estadoEstampas[key]);
+            Object.entries(nuevosEstados).forEach(([id, cantidad]) => {
+                if (dbCorrelativos[Number(id)] && Number(cantidad) > 0) estadoEstampas[id] = Number(cantidad);
+            });
+
+            guardarEstadoAlbum();
+            filtroAlbum = "all";
+            busquedaAlbum = "";
+            estampaSeleccionadaId = null;
+            mostrarImportadorAlbum = false;
+            mostrarListadoAlbum = false;
+            mostrarResumenAlbum = false;
+            preservarScrollAlbum = false;
+            renderizarControlAlbum();
+
+            const mensajeInferencia = inferirTengoPorFaltantes
+                ? "\nComo importaste faltantes, marqué el resto como ya tengo."
+                : "";
+            alert(`Álbum actualizado.\nTengo: ${obtenerIdsTengo().length}\nRepetidas: ${obtenerIdsPorEstado(2).length}\nFaltan: ${obtenerIdsFaltanAlbum().length}${mensajeInferencia}`);
         };
 
         window.seleccionarEstampa = (id) => {
@@ -1278,7 +1658,7 @@
             if (panel) {
                 panel.classList.remove("hidden");
                 const status = document.getElementById("scannerStatus");
-                if (status) status.textContent = "Cámara apagada. Entra de nuevo a Escáner para activarla.";
+                if (status) status.textContent = "Cámara apagada. Usa Escanear con cámara para activarla de nuevo.";
             }
         };
 
@@ -1386,7 +1766,7 @@
         // ========================================================
         // 5. LÓGICA DE CRUCE (SUJETO B)
         // ========================================================
-        window.calcularCruce = (nombreA, stringDataA) => {
+        window.calcularCruce = async (nombreA, stringDataA) => {
             try {
                 const aliasB = document.getElementById('nombreB').value.trim() || "Tú";
                 const dataAOriginal = JSON.parse(stringDataA);
@@ -1430,7 +1810,11 @@
                 };
 
                 const base64Respuesta = codificarDatos(objetoRespuesta);
-                const linkRespuestaFinal = `${window.location.origin}${window.location.pathname}?p=${base64Respuesta}&m=r`;
+                const fallbackRespuesta = `${window.location.origin}${window.location.pathname}?p=${base64Respuesta}&m=r`;
+                const respuestaGuardada = await guardarRespuestaIntercambio(shareIdParam, objetoRespuesta);
+                const linkRespuestaFinal = respuestaGuardada
+                    ? crearLinkCorto(shareIdParam, "r")
+                    : fallbackRespuesta;
 
                 document.getElementById('inputLinkRespuesta').value = linkRespuestaFinal;
                 document.getElementById('resultadoCruce').classList.remove('hidden');
